@@ -89,8 +89,8 @@
 | 配置项 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `accessMode` | `string` | `all` | 访问权限模式。可选 `all` (所有), `whitelist` (白名单), `blacklist` (黑名单)。 |
-| `whitelist` | `string[]` | `[]` | 白名单列表。请填入群号或频道 ID。 |
-| `blacklist` | `string[]` | `[]` | 黑名单列表。请填入群号或频道 ID。 |
+| `whitelist` | `string` | `[]` | 白名单列表。请填入群号或频道 ID。 |
+| `blacklist` | `string` | `[]` | 黑名单列表。请填入群号或频道 ID。 |
 
 ### 下载与发送设置
 
