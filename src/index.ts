@@ -7,6 +7,8 @@ import { pathToFileURL } from 'url'
 import { Context, Schema, h, Session } from 'koishi'
 // 导入 archiver 库
 import archiver from 'archiver'
+// 导入 Puppeteer 类型
+import type Puppeteer from 'koishi-plugin-puppeteer'
 
 // 注册加密的 ZIP 格式
 if (!archiver.isRegisteredFormat('zip-encrypted')) {
@@ -19,16 +21,13 @@ export const inject = {
   optional: ['puppeteer']
 }
 
-declare module 'koishi' {
-  interface Context {}
-}
-
 type SendMode = 'card' | 'file' | 'zip';
 
 export interface Config {
   useForward: boolean;
   showSearchImage: boolean;
   useImageMenu: boolean;
+  showLinks: boolean;
   accessMode: 'all' | 'whitelist' | 'blacklist';
   whitelist: string[];
   blacklist: string[];
@@ -40,9 +39,10 @@ export interface Config {
 
 export const Config: Schema<Config> = Schema.intersect([
     Schema.object({
-        useForward: Schema.boolean().default(true).description('使用合并转发的形式发送消息 (非图片菜单模式下生效)。'),
-        showSearchImage: Schema.boolean().default(true).description('在“搜音声”结果中显示封面图 (非图片菜单模式下生效)。\n\n注意：开启此项会增加图片消息被平台审查导致发送失败的风险。'),
+        useForward: Schema.boolean().default(false).description('使用合并转发的形式发送消息 (非图片菜单模式下生效)。'),
+        showSearchImage: Schema.boolean().default(false).description('在“搜音声”结果中显示封面图 (非图片菜单模式下生效)。\n\n注意：开启此项会增加图片消息被平台审查导致发送失败的风险。'),
         useImageMenu: Schema.boolean().default(true).description('**[推荐]** 使用图片菜单模式发送结果。\n\n此将结果渲染成图片菜单，可以一定程度上规避风控。需要安装 `koishi-plugin-puppeteer`。'),
+        showLinks: Schema.boolean().default(false).description('是否在听音声结果中返回 asmr.one 和 DLsite 的链接。'),
     }).description('基础设置'),
     Schema.object({
         accessMode: Schema.union([
@@ -383,7 +383,7 @@ export function apply(ctx: Context, config: Config) {
       </div></body></html>`;
   }
 
-  function createWorkInfoHtml(workInfo: WorkInfoResponse, tracks: Track[]): string {
+  function createWorkInfoHtml(workInfo: WorkInfoResponse, tracks: Track[], linksHtml: string): string {
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
     const cvs = workInfo.vas.map(v => h.escape(v.name)).join(', ') || '未知';
     const tags = workInfo.tags.map(t => `<span class="tag">${h.escape(t.name)}</span>`).join('');
@@ -403,6 +403,8 @@ export function apply(ctx: Context, config: Config) {
       .cover-container { width: 224px; aspect-ratio: 560 / 420; border-radius: 6px; overflow: hidden; flex-shrink: 0; background-size: cover; background-position: center; }
       .info { flex-grow: 1; min-width: 0; }
       .details { display: grid; grid-template-columns: 1fr; gap: 8px; font-size: 14px; color: var(--text-light-color); margin-bottom: 10px; }
+      .links { display: grid; grid-template-columns: 1fr; gap: 8px; font-size: 13px; color: var(--text-light-color); margin-top: 10px; word-break: break-all; }
+      .links a { color: var(--accent-color); text-decoration: none; }
       .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
       .tag { background-color: var(--tag-bg-color); color: var(--tag-text-color); padding: 3px 8px; border-radius: 4px; font-size: 12px; }
       .divider { border: 0; height: 1px; background-color: #444; margin: 20px 0; }
@@ -423,7 +425,9 @@ export function apply(ctx: Context, config: Config) {
                     <span><strong>社团:</strong> ${h.escape(workInfo.name)}</span><span><strong>声优:🎤</strong> ${cvs}</span><span><strong>日期:📅</strong> ${workInfo.release}</span>
                     <span><strong>评分:⭐️</strong> ${workInfo.rate_average_2dp} (${workInfo.rate_count}人)</span><span><strong>销量:📥</strong> ${workInfo.dl_count}</span>
                     <span><strong>时长:⏱️</strong> ${formatWorkDuration(workInfo.duration)}</span>
-                </div><div class="tags">${tags}</div>
+                </div>
+                ${linksHtml}
+                <div class="tags">${tags}</div>
             </div>
         </div>
         <hr class="divider" />
@@ -450,8 +454,34 @@ export function apply(ctx: Context, config: Config) {
           return;
       }
 
+      const infoBlockArray = [
+        `【${rjCode}】`, `标题: ${h.escape(workInfo.title)}`, `社团: ${h.escape(workInfo.name)}`, 
+        `日期: 📅 ${workInfo.release}`, `评分: ⭐️ ${workInfo.rate_average_2dp} (${workInfo.rate_count}人评价)`,
+        `销量: 📥 ${workInfo.dl_count}`, `时长: ⏱️ ${formatWorkDuration(workInfo.duration)}`, 
+        `声优: 🎤 ${h.escape(workInfo.vas.map(v=>v.name).join(', '))}`, 
+        `标签: 🏷️ ${h.escape(workInfo.tags.map(t=>t.name).join(', '))}`
+      ];
+
+      if (config.showLinks) {
+        const asmrOneUrl = `https://asmr.one/work/${rjCode}`;
+        infoBlockArray.push(`asmr.one链接: ${asmrOneUrl}`);
+        if (workInfo.source_url) {
+          infoBlockArray.push(`DLsite链接: ${workInfo.source_url}`);
+        }
+      }
+
       if (config.useImageMenu && ctx.puppeteer) {
-        const html = createWorkInfoHtml(workInfo, allTracks);
+        let linksHtml = '';
+        if (config.showLinks) {
+          const asmrOneUrl = `https://asmr.one/work/${rjCode}`;
+          linksHtml = `
+            <div class="links">
+              <span><strong>ASMR.one:</strong> <a href="${asmrOneUrl}">${h.escape(asmrOneUrl)}</a></span>
+              ${workInfo.source_url ? `<span><strong>DLsite:</strong> <a href="${workInfo.source_url}">${h.escape(workInfo.source_url)}</a></span>` : ''}
+            </div>
+          `;
+        }
+        const html = createWorkInfoHtml(workInfo, allTracks, linksHtml);
         const imageBuffer = await renderHtmlToImage(html, { width: 840, height: 600 });
         if (imageBuffer) {
           await session.send(h.image(imageBuffer, 'image/png'));
@@ -459,7 +489,7 @@ export function apply(ctx: Context, config: Config) {
           await session.send('图片菜单渲染失败，请检查后台日志。');
         }
       } else {
-        const infoBlock = [`【${rjCode}】`, `标题: ${h.escape(workInfo.title)}`, `社团: ${h.escape(workInfo.name)}`, `日期: 📅 ${workInfo.release}`, `评分: ⭐️ ${workInfo.rate_average_2dp} (${workInfo.rate_count}人评价)`, `销量: 📥 ${workInfo.dl_count}`, `时长: ⏱️ ${formatWorkDuration(workInfo.duration)}`, `声优: 🎤 ${h.escape(workInfo.vas.map(v=>v.name).join(', '))}`, `标签: 🏷️ ${h.escape(workInfo.tags.map(t=>t.name).join(', '))}`].join('\n');
+        const infoBlock = infoBlockArray.join('\n');
         const trackListText = `--- 音轨列表 ---\n` + allTracks.map((track, index) => {
             const duration = formatTrackDuration(track.duration);
             const size = formatTrackSize(track.size);
