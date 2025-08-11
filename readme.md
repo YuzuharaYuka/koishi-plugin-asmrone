@@ -1,6 +1,6 @@
 # koishi-plugin-asmrone
 
-[![npm](https://img-shields.io/npm/v/koishi-plugin-asmrone?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-asmrone)
+[![npm](https://img.shields.io/npm/v/koishi-plugin-asmrone?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-asmrone)
 
 利用 [asmr.one](https://asmr.one) 的API，提供在聊天平台中搜索、查看并收听音声作品的功能。
 
@@ -79,9 +79,10 @@
 
 | 配置项 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `useForward` | `boolean` | `true` | (非图片菜单模式下) 是否使用合并转发来发送长消息。 |
-| `showSearchImage` | `boolean` | `true` | (非图片菜单模式下) 是否在搜索结果中显示封面图。**警告**：可能增加风控风险。 |
+| `useForward` | `boolean` | `false` | (非图片菜单模式下) 是否使用合并转发来发送长消息。 |
+| `showSearchImage` | `boolean` | `false` | (非图片菜单模式下) 是否在搜索结果中显示封面图。**警告**：可能增加风控风险。 |
 | `useImageMenu` | `boolean` | `true` | **(推荐)** 是否启用图片菜单模式。需要 `koishi-plugin-puppeteer`。 |
+| `showLinks` | `boolean` | `false` | 是否在听音声结果中返回 asmr.one 和 DLsite 的链接。 |
 
 ### 权限设置
 
