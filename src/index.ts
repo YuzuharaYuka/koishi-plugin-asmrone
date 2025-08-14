@@ -20,7 +20,7 @@ export const inject = ['http', 'puppeteer']
 
 type SendMode = 'card' | 'file' | 'zip';
 
-// ... (Config 部分未变，此处省略)
+// ... (Config 和 usage 部分未变，此处省略)
 export interface Config {
   useForward: boolean;
   showSearchImage: boolean;
@@ -78,18 +78,17 @@ export const Config: Schema<Config> = Schema.intersect([
     ]),
 ]) as Schema<Config>
 
-// [!code ++]
 export const usage = `
 ##	注意：部分内容可能不适合在所有场合使用 (NSFW)，请在合适的范围内使用本插件。
 
-## 插件指令
+##	插件指令
 
 ### 搜音声 <关键词> [页数]: 搜索音声作品。
 *	**示例 ：** \`搜音声 藤田茜\` 
-	*	如果想使用多个标签进行搜索，请用 / 分割，例如：\`搜音声 催眠/JK 2\`
-    *   若启用图片菜单，可直接回复【序号】选择作品，回复【f】翻页，回复【n/取消】退出。
+    *	如果想使用多个标签进行搜索，请用 / 分割，例如：\`搜音声 催眠/JK 2\`
+    *	若启用图片菜单，可直接回复【序号】选择作品，回复【f】翻页，回复【n/取消】退出。
     
-    ### 热门音声 [页数]: 获取当前热门作品列表。
+### 热门音声 [页数]: 获取当前热门作品列表。
 *   **示例 ：** \`热门音声\` 
 *   交互逻辑与搜音声一致，可回复【序号】选择，【f】翻页，【n/取消】退出。
 
@@ -100,8 +99,8 @@ export const usage = `
     *   **card**: 以音乐卡片形式发送。
     *   **file**: 逐个发送音频文件。
     *   **zip**: 将所有请求的音轨打包成ZIP压缩包发送。
-	*	如果未提供选项，将使用插件配置中的【默认发送方式】。
-*   **示例 1 (使用默认方式):** \`听音声 RJ01234567\`
+    *   如果未提供选项，将使用插件配置中的【默认发送方式】。
+*   **示例 1 (使用默认方式):** \`听音声 RJ001234567\`
 *   **示例 2 (指定发送卡片):** \`听音声 123456 3 card\`
 *   **示例 3 (指定发送压缩包):** \`听音声 RJ123456 1 3 5 zip\`
     
@@ -109,10 +108,9 @@ export const usage = `
 *   在 QQ 平台发送消息或文件失败大概率是平台风控导致。
 *   音乐卡片(card)模式可能需要配置签名服务，或在部分平台不可用，目前仅测试了onebot适配器和napcat框架。
 `
-// [!code --]
+
 
 interface Tag { name: string }
-// ... (rest of interfaces are unchanged)
 interface Va { name: string }
 interface BaseWork { id: number; title: string; name: string; mainCoverUrl: string; release: string; dl_count: number; rate_average_2dp: number; rate_count: number; vas: Va[]; tags: Tag[]; duration: number; source_url: string; }
 interface ApiSearchResponse { works: BaseWork[]; pagination: { totalCount: number; currentPage: number } }
@@ -121,12 +119,12 @@ type WorkInfoResponse = BaseWork
 type Track = { title: string; url: string; duration?: number; size?: number; };
 type ValidTrack = { index: number; track: Track };
 
+
 export function apply(ctx: Context, config: Config) {
   const logger = ctx.logger('asmrone')
   const tempDir = resolve(ctx.baseDir, 'temp', 'asmrone')
   const activeInteractions = new Set<string>();
 
-  // ... (isAccessAllowed, ready, helpers, etc. are unchanged)
   function isAccessAllowed(session: Session): boolean {
     if (session.isDirect) return true
     if (!session.guildId) return false
@@ -142,9 +140,8 @@ export function apply(ctx: Context, config: Config) {
     } catch (error) {
       logger.error('创建临时文件目录失败: %o', error)
     }
-    // 由于使用了 using，这里的 ctx.puppeteer 在 ready 时应该是可用的
     if (config.useImageMenu && !ctx.puppeteer) {
-      logger.warn('图片菜单功能已开启，但 puppeteer 服务注入失败。请检查插件依赖。');
+      logger.warn('图片菜单功能已开启，但未找到 puppeteer 服务。请安装 koishi-plugin-puppeteer 并重启。');
     }
   })
   
@@ -233,7 +230,7 @@ export function apply(ctx: Context, config: Config) {
   async function _sendAsCard(validTracks: ValidTrack[], workInfo: WorkInfoResponse, session: Session) {
     if (session.platform !== 'onebot') {
       await session.send('音乐卡片模式 (card) 仅在 onebot 平台受支持，已自动切换为发送文件。');
-      await _sendAsFile(validTracks, workInfo, session); // 注意：这里需要调用拆分后的函数
+      await _sendAsFile(validTracks, workInfo, session);
       return;
     }
     await session.send(`正在为 ${validTracks.length} 个音轨生成音乐卡片...`);
@@ -258,7 +255,6 @@ export function apply(ctx: Context, config: Config) {
         await session.send(`正在并行下载 ${validTracks.length} 个音轨，准备合并压缩...`);
         let tempZipPath: string;
         try {
-            // 并行下载所有音轨
             const downloadPromises = validTracks.map(({ index, track }) =>
                 ctx.http.get<ArrayBuffer>(track.url, { ...requestOptions, responseType: 'arraybuffer', timeout: config.downloadTimeout * 1000 })
                     .then(buffer => ({ status: 'fulfilled' as const, value: { name: getSafeFilename(track.title), data: Buffer.from(buffer) }, index }))
@@ -267,16 +263,27 @@ export function apply(ctx: Context, config: Config) {
             const results = await Promise.allSettled(downloadPromises);
 
             const downloadedFiles: { name: string; data: Buffer }[] = [];
+            
+            // [!code ++]
             for (const result of results) {
-                if (result.status === 'fulfilled' && result.value.value.data.byteLength > 100) {
-                    downloadedFiles.push(result.value.value);
-                } else if (result.status === 'fulfilled') { // 文件过小
-                    await session.send(`音轨 ${result.value.index} 下载失败 (文件为空)，已跳过。`);
-                } else { // rejected
-                    logger.error('下载音轨 %s (%s) 失败: %o', result.reason.index, result.reason.title, result.reason.reason);
-                    await session.send(`下载音轨 ${result.reason.index} 「${h.escape(result.reason.title)}」失败，已跳过。`);
+              // The outer promise from allSettled will always be 'fulfilled' because we used .catch()
+              if (result.status === 'fulfilled') {
+                const downloadOutcome = result.value;
+                // Now we check the status of our inner, custom result object
+                if (downloadOutcome.status === 'fulfilled') {
+                  if (downloadOutcome.value.data.byteLength > 100) {
+                    downloadedFiles.push(downloadOutcome.value);
+                  } else {
+                    await session.send(`音轨 ${downloadOutcome.index} 下载失败 (文件为空)，已跳过。`);
+                  }
+                } else { // downloadOutcome.status === 'rejected'
+                  logger.error('下载音轨 %s (%s) 失败: %o', downloadOutcome.index, downloadOutcome.title, downloadOutcome.reason);
+                  await session.send(`下载音轨 ${downloadOutcome.index} 「${h.escape(downloadOutcome.title)}」失败，已跳过。`);
                 }
+              }
+              // The 'else' case for result.status is practically unreachable here.
             }
+            // [!code --]
             
             if (downloadedFiles.length > 0) {
                 const zipFilename = getZipFilename(workInfo.title);
@@ -294,7 +301,7 @@ export function apply(ctx: Context, config: Config) {
         } finally {
             if (tempZipPath) await fs.unlink(tempZipPath).catch(e => logger.warn('删除临时压缩包失败: %s', e));
         }
-    } else { // multiple mode
+    } else {
         await session.send(`正在准备单独压缩，共 ${validTracks.length} 个音轨...`);
         for (const { index, track } of validTracks) {
             let tempZipPath: string;
@@ -321,7 +328,6 @@ export function apply(ctx: Context, config: Config) {
   async function _sendAsFile(validTracks: ValidTrack[], workInfo: WorkInfoResponse, session: Session) {
     await session.send(`将开始并行下载 ${validTracks.length} 个音频文件，下载完成后将逐个发送...`);
     
-    // 并行下载
     const downloadPromises = validTracks.map(({ index, track }) =>
         ctx.http.get<ArrayBuffer>(track.url, { ...requestOptions, responseType: 'arraybuffer', timeout: config.downloadTimeout * 1000 })
             .then(buffer => ({ status: 'fulfilled' as const, value: { buffer: Buffer.from(buffer), track }, index }))
@@ -329,29 +335,35 @@ export function apply(ctx: Context, config: Config) {
     );
     const results = await Promise.allSettled(downloadPromises);
 
-    // 串行发送
+    // [!code ++]
     for (const result of results) {
         let tempFilePath: string;
-        if (result.status === 'fulfilled' && result.value.value.buffer.byteLength > 100) {
-            const { buffer, track } = result.value.value;
-            try {
-                tempFilePath = resolve(tempDir, getSafeFilename(track.title));
-                await fs.writeFile(tempFilePath, buffer);
-                await session.send(`正在发送文件: 「${h.escape(track.title)}」`);
-                await session.send(h('file', { src: pathToFileURL(tempFilePath).href, title: track.title }));
-            } catch (error) {
-                logger.error('发送音频文件 %s 失败: %o', result.value.index, error);
-                await session.send(`发送音轨 ${result.value.index} 「${h.escape(track.title)}」失败。`);
-            } finally {
-                if (tempFilePath) await fs.unlink(tempFilePath).catch(e => logger.warn('删除临时文件失败: %s', e));
+        if (result.status === 'fulfilled') {
+            const downloadOutcome = result.value;
+            if (downloadOutcome.status === 'fulfilled') {
+                if (downloadOutcome.value.buffer.byteLength > 100) {
+                    const { buffer, track } = downloadOutcome.value;
+                    try {
+                        tempFilePath = resolve(tempDir, getSafeFilename(track.title));
+                        await fs.writeFile(tempFilePath, buffer);
+                        await session.send(`正在发送文件: 「${h.escape(track.title)}」`);
+                        await session.send(h('file', { src: pathToFileURL(tempFilePath).href, title: track.title }));
+                    } catch (error) {
+                        logger.error('发送音频文件 %s 失败: %o', downloadOutcome.index, error);
+                        await session.send(`发送音轨 ${downloadOutcome.index} 「${h.escape(track.title)}」失败。`);
+                    } finally {
+                        if (tempFilePath) await fs.unlink(tempFilePath).catch(e => logger.warn('删除临时文件失败: %s', e));
+                    }
+                } else {
+                    await session.send(`音轨 ${downloadOutcome.index} 下载失败 (文件为空)，已跳过。`);
+                }
+            } else { // downloadOutcome.status === 'rejected'
+                logger.error('下载音轨 %s (%s) 失败: %o', downloadOutcome.index, downloadOutcome.title, downloadOutcome.reason);
+                await session.send(`下载音轨 ${downloadOutcome.index} 「${h.escape(downloadOutcome.title)}」失败，已跳过。`);
             }
-        } else if (result.status === 'fulfilled') {
-             await session.send(`音轨 ${result.value.index} 下载失败 (文件为空)，已跳过。`);
-        } else { // rejected
-            logger.error('下载音轨 %s (%s) 失败: %o', result.reason.index, result.reason.title, result.reason.reason);
-            await session.send(`下载音轨 ${result.reason.index} 「${h.escape(result.reason.title)}」失败，已跳过。`);
         }
     }
+    // [!code --]
   }
 
   async function processAndSendTracks(indices: number[], allTracks: Track[], workInfo: WorkInfoResponse, session: Session, mode: SendMode) {
@@ -379,6 +391,7 @@ export function apply(ctx: Context, config: Config) {
   }
   // #endregion
 
+  // ... (Rest of the file is unchanged)
   // #region HTML 渲染函数
   async function renderHtmlToImage(html: string, viewport: { width: number; height: number }): Promise<Buffer | null> {
     if (!ctx.puppeteer) return null;
@@ -632,7 +645,6 @@ export function apply(ctx: Context, config: Config) {
     }
   }
 
-  // [!code ++]
   async function handleListInteraction(
     session: Session, 
     page: number, 
@@ -755,9 +767,7 @@ export function apply(ctx: Context, config: Config) {
           await session.send(messageElements);
       }
   }
-  // [!code --]
   
-  // [!code ++]
   ctx.command('热门音声 [page:number]', '获取当前热门音声列表')
     .action(async ({ session }, page = 1) => {
       if (!isAccessAllowed(session)) return;
@@ -784,7 +794,6 @@ export function apply(ctx: Context, config: Config) {
 
       await handleListInteraction(session, page, fetcher, '热门音声', onNextPage);
     });
-  // [!code --]
 
   ctx.command('搜音声 <query:text>', '搜索音声作品')
     .action(async ({ session }, query) => {
@@ -801,7 +810,6 @@ export function apply(ctx: Context, config: Config) {
       const keyword = args[0];
       const page = args[1] && /^\d+$/.test(args[1]) ? parseInt(args[1], 10) : 1;
       
-      // [!code ++]
       const keywordForApi = keyword.replace(/\//g, '%20');
       const fetcher = (currentPage: number) => {
         const url = `${config.apiBaseUrl}/search/${keywordForApi}?order=dl_count&sort=desc&page=${currentPage}&pageSize=10&subtitle=0&includeTranslationWorks=true`;
@@ -812,7 +820,6 @@ export function apply(ctx: Context, config: Config) {
         handleListInteraction(nextSession, nextPage, fetcher, keyword, onNextPage);
         
       await handleListInteraction(session, page, fetcher, keyword, onNextPage);
-      // [!code --]
     });
 
   ctx.command('听音声 <query:text>', '获取并收听音声')
