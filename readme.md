@@ -92,6 +92,7 @@
 | `showSearchImage` | `boolean` | `false` | (非图片菜单模式下) 是否在搜索结果中显示封面图。**警告**：可能增加风控风险。 |
 | `useImageMenu` | `boolean` | `true` | **(推荐)** 是否启用图片菜单模式。需要 `koishi-plugin-puppeteer`。 |
 | `showLinks` | `boolean` | `false` | 是否在听音声结果中返回 asmr.one 和 DLsite 的链接。 |
+| `pageSize` | `number` | `10` | 每页展示的结果数量，范围1-40。 |
 
 ### 权限设置
 

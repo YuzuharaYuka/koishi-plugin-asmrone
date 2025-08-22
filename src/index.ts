@@ -20,12 +20,12 @@ export const inject = ['http', 'puppeteer']
 
 type SendMode = 'card' | 'file' | 'zip';
 
-// ... (Config 和 usage 部分未变，此处省略)
 export interface Config {
   useForward: boolean;
   showSearchImage: boolean;
   useImageMenu: boolean;
   showLinks: boolean;
+  pageSize: number;
   accessMode: 'all' | 'whitelist' | 'blacklist';
   whitelist: string[];
   blacklist: string[];
@@ -44,6 +44,7 @@ export const Config: Schema<Config> = Schema.intersect([
         showSearchImage: Schema.boolean().default(false).description('在“搜音声”结果中显示封面图 (非图片菜单模式下生效)。\n\n注意：开启此项会增加图片消息被平台审查导致发送失败的风险。'),
         useImageMenu: Schema.boolean().default(true).description('**[推荐]** 使用图片菜单模式发送结果。\n\n此将结果渲染成图片菜单，可以一定程度上规避风控。需要安装 `koishi-plugin-puppeteer`。'),
         showLinks: Schema.boolean().default(false).description('是否在听音声结果中返回 asmr.one 和 DLsite 的链接。'),
+        pageSize: Schema.number().min(1).max(40).default(10).description('每页展示的结果数量，范围1-40。'),
     }).description('基础设置'),
     Schema.object({
         accessMode: Schema.union([
@@ -100,7 +101,7 @@ export const usage = `
     *   **file**: 逐个发送音频文件。
     *   **zip**: 将所有请求的音轨打包成ZIP压缩包发送。
     *   如果未提供选项，将使用插件配置中的【默认发送方式】。
-*   **示例 1 (使用默认方式):** \`听音声 RJ001234567\`
+*   **示例 1 (使用默认方式):** \`听音声 RJ01234567\`
 *   **示例 2 (指定发送卡片):** \`听音声 123456 3 card\`
 *   **示例 3 (指定发送压缩包):** \`听音声 RJ123456 1 3 5 zip\`
     
@@ -264,26 +265,21 @@ export function apply(ctx: Context, config: Config) {
 
             const downloadedFiles: { name: string; data: Buffer }[] = [];
             
-            // [!code ++]
             for (const result of results) {
-              // The outer promise from allSettled will always be 'fulfilled' because we used .catch()
               if (result.status === 'fulfilled') {
                 const downloadOutcome = result.value;
-                // Now we check the status of our inner, custom result object
                 if (downloadOutcome.status === 'fulfilled') {
                   if (downloadOutcome.value.data.byteLength > 100) {
                     downloadedFiles.push(downloadOutcome.value);
                   } else {
                     await session.send(`音轨 ${downloadOutcome.index} 下载失败 (文件为空)，已跳过。`);
                   }
-                } else { // downloadOutcome.status === 'rejected'
+                } else {
                   logger.error('下载音轨 %s (%s) 失败: %o', downloadOutcome.index, downloadOutcome.title, downloadOutcome.reason);
                   await session.send(`下载音轨 ${downloadOutcome.index} 「${h.escape(downloadOutcome.title)}」失败，已跳过。`);
                 }
               }
-              // The 'else' case for result.status is practically unreachable here.
             }
-            // [!code --]
             
             if (downloadedFiles.length > 0) {
                 const zipFilename = getZipFilename(workInfo.title);
@@ -335,7 +331,6 @@ export function apply(ctx: Context, config: Config) {
     );
     const results = await Promise.allSettled(downloadPromises);
 
-    // [!code ++]
     for (const result of results) {
         let tempFilePath: string;
         if (result.status === 'fulfilled') {
@@ -357,13 +352,12 @@ export function apply(ctx: Context, config: Config) {
                 } else {
                     await session.send(`音轨 ${downloadOutcome.index} 下载失败 (文件为空)，已跳过。`);
                 }
-            } else { // downloadOutcome.status === 'rejected'
+            } else {
                 logger.error('下载音轨 %s (%s) 失败: %o', downloadOutcome.index, downloadOutcome.title, downloadOutcome.reason);
                 await session.send(`下载音轨 ${downloadOutcome.index} 「${h.escape(downloadOutcome.title)}」失败，已跳过。`);
             }
         }
     }
-    // [!code --]
   }
 
   async function processAndSendTracks(indices: number[], allTracks: Track[], workInfo: WorkInfoResponse, session: Session, mode: SendMode) {
@@ -391,7 +385,6 @@ export function apply(ctx: Context, config: Config) {
   }
   // #endregion
 
-  // ... (Rest of the file is unchanged)
   // #region HTML 渲染函数
   async function renderHtmlToImage(html: string, viewport: { width: number; height: number }): Promise<Buffer | null> {
     if (!ctx.puppeteer) return null;
@@ -425,17 +418,20 @@ export function apply(ctx: Context, config: Config) {
       const rjCode = `RJ${String(work.id).padStart(8, '0')}`;
       const cvs = work.vas.map(v => h.escape(v.name)).join(', ') || '未知';
       const tags = work.tags.slice(0, 20).map(t => `<span class="tag">${h.escape(t.name)}</span>`).join('');
+      const duration = formatWorkDuration(work.duration);
       return `
         <div class="work-item">
-          <div class="index">${(pageNum - 1) * 10 + index + 1}</div>
+          <div class="index">${(pageNum - 1) * config.pageSize + index + 1}</div>
           <div class="cover-container"><img src="${work.mainCoverUrl}" class="cover" /></div>
           <div class="info">
             <div class="title">【${rjCode}】${h.escape(work.title)}</div>
             <div class="details">
+              <span><i class="icon">社团：🏢</i>${h.escape(work.name)}</span>
               <span><i class="icon">声优：🎤</i>${cvs}</span>
               <span><i class="icon">评分：⭐️</i>${work.rate_average_2dp} (${work.rate_count})</span>
               <span><i class="icon">销量：📥</i>${work.dl_count}</span>
               <span><i class="icon">日期：📅</i>${work.release}</span>
+              <span><i class="icon">时长：⏱️</i>${duration}</span>
             </div>
             <div class="tags">${tags}</div>
           </div>
@@ -443,13 +439,16 @@ export function apply(ctx: Context, config: Config) {
     }).join('');
     return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><style>
       ${menuStyle}
-      .work-item { display: flex; align-items: flex-start; background-color: var(--item-bg-color); border-radius: 8px; padding: 15px; margin-bottom: 15px; border-left: 4px solid var(--accent-color); }
+      // .work-item { display: flex; align-items: flex-start; background-color: var(--item-bg-color); border-radius: 8px; padding: 15px; margin-bottom: 15px; border-left: 4px solid var(--accent-color); }
+      .work-item { display: flex; align-items: center; background-color: var(--item-bg-color); border-radius: 8px; padding: 15px; margin-bottom: 15px; border-left: 4px solid var(--accent-color); }
       .index { font-size: 28px; font-weight: bold; color: var(--highlight-color); margin-right: 15px; align-self: center; }
-      .cover-container { width: 140px; aspect-ratio: 560 / 420; border-radius: 6px; overflow: hidden; flex-shrink: 0; margin-right: 15px; }
+      // .cover-container { width: 140px; aspect-ratio: 560 / 420; border-radius: 6px; overflow: hidden; flex-shrink: 0; margin-right: 15px; }
+      .cover-container { width: 160px; aspect-ratio: 560 / 420; border-radius: 6px; overflow: hidden; flex-shrink: 0; margin-right: 15px; }
       .cover { width: 100%; height: 100%; object-fit: cover; }
       .info { display: flex; flex-direction: column; flex-grow: 1; min-width: 0; }
       .title { font-size: 18px; font-weight: bold; color: var(--title-color); margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .details { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 15px; font-size: 14px; color: var(--text-light-color); margin-bottom: 8px; }
+      // .details { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 15px; font-size: 14px; color: var(--text-light-color); margin-bottom: 8px; }
+      .details { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px 15px; font-size: 14px; color: var(--text-light-color); margin-bottom: 8px; }
       .details span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .icon { font-style: normal; margin-right: 5px; }
       .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
@@ -500,7 +499,7 @@ export function apply(ctx: Context, config: Config) {
             <div class="cover-container" style="background-image: url('${workInfo.mainCoverUrl}')"></div>
             <div class="info">
                 <div class="details">
-                    <span><strong>社团:</strong> ${h.escape(workInfo.name)}</span><span><strong>声优:🎤</strong> ${cvs}</span><span><strong>日期:📅</strong> ${workInfo.release}</span>
+                    <span><strong>社团:🏢</strong> ${h.escape(workInfo.name)}</span><span><strong>声优:🎤</strong> ${cvs}</span><span><strong>日期:📅</strong> ${workInfo.release}</span>
                     <span><strong>评分:⭐️</strong> ${workInfo.rate_average_2dp} (${workInfo.rate_count}人)</span><span><strong>销量:📥</strong> ${workInfo.dl_count}</span>
                     <span><strong>时长:⏱️</strong> ${formatWorkDuration(workInfo.duration)}</span>
                 </div>
@@ -534,7 +533,7 @@ export function apply(ctx: Context, config: Config) {
       }
       
       const infoBlockArray = [
-        `【${rjCode}】`, `标题: ${h.escape(workInfo.title)}`, `社团: ${h.escape(workInfo.name)}`, 
+        `【${rjCode}】`, `标题: ${h.escape(workInfo.title)}`, `社团: 🏢 ${h.escape(workInfo.name)}`, 
         `日期: 📅 ${workInfo.release}`, `评分: ⭐️ ${workInfo.rate_average_2dp} (${workInfo.rate_count}人评价)`,
         `销量: 📥 ${workInfo.dl_count}`, `时长: ⏱️ ${formatWorkDuration(workInfo.duration)}`, 
         `声优: 🎤 ${h.escape(workInfo.vas.map(v=>v.name).join(', '))}`, 
@@ -703,7 +702,7 @@ export function apply(ctx: Context, config: Config) {
         }
         
         const choice = parseInt(content, 10);
-        const localIndex = choice - (page - 1) * 10;
+        const localIndex = choice - (page - 1) * config.pageSize;
         if (isNaN(choice) || localIndex < 1 || localIndex > data.works.length) return next();
         
         activeInteractions.delete(interactionKey);
@@ -728,18 +727,29 @@ export function apply(ctx: Context, config: Config) {
     }
   }
 
+  function buildEntryText(work: BaseWork, index: number, page: number): string {
+    const rjCode = `RJ${String(work.id).padStart(8, '0')}`;
+    const tags = work.tags.slice(0, 5).map(t => t.name).join(', ');
+    return [
+        `${(page - 1) * config.pageSize + index + 1}. 【${rjCode}】`,
+        `   标题: ${h.escape(work.title)}`,
+        `   社团: 🏢 ${h.escape(work.name)}`,
+        `   日期: 📅 ${work.release}`,
+        `   声优: 🎤 ${h.escape(work.vas.map(v => v.name).join(', ') || '未知')}`,
+        `   评分: ⭐️ ${work.rate_average_2dp} (${work.rate_count})`,
+        `   销量: 📥 ${work.dl_count}`,
+        `   时长: ⏱️ ${formatWorkDuration(work.duration)}`,
+        `   标签: 🏷️ ${h.escape(tags)}`,
+    ].join('\n');
+  }
+
   async function sendSearchTextResult(session: Session, data: ApiSearchResponse, page: number) {
       const header = `为你找到 ${data.pagination.totalCount} 个结果 (第 ${page} 页):`;
-      const footer = '请使用 `听音声 <RJ号>` 获取详细信息和收听。';
+      const footer = '回复【序号】选择作品，【n/取消】退出';
       if (config.useForward && session.platform === 'onebot') {
           const messageNodes: h[] = [h('message', { nickname: session.bot.user?.name || session.bot.selfId }, header)];
           data.works.forEach((work, index) => {
-              const rjCode = `RJ${String(work.id).padStart(8, '0')}`;
-              const entryText = [
-                  `${(page-1)*10+index+1}. 【${rjCode}】${h.escape(work.title)}`,
-                  `   评分: ⭐️ ${work.rate_average_2dp} (${work.rate_count}人) | 销量: 📥 ${work.dl_count}`,
-                  `   声优: 🎤 ${h.escape(work.vas.map(v => v.name).join(', ') || '未知')}`,
-              ].join('\n');
+              const entryText = buildEntryText(work, index, page);
               if (config.showSearchImage) {
                 messageNodes.push(h('message', { nickname: `结果 ${index + 1}` }, [h.image(work.mainCoverUrl), '\n', entryText]));
               } else {
@@ -750,20 +760,13 @@ export function apply(ctx: Context, config: Config) {
       } else {
           const messageElements: (string | h)[] = [header];
           data.works.forEach((work, index) => {
-              if (index > 0) messageElements.push('\n' + '─'.repeat(10) + '\n');
-              const rjCode = `RJ${String(work.id).padStart(8, '0')}`;
-              const entryText = [
-                  `${(page-1)*10+index+1}. 【${rjCode}】${h.escape(work.title)}`,
-                  `   评分: ⭐️ ${work.rate_average_2dp} (${work.rate_count}人) | 销量: 📥 ${work.dl_count}`,
-                  `   声优: 🎤 ${h.escape(work.vas.map(v => v.name).join(', ') || '未知')}`,
-              ].join('\n');
-
+              if (index > 0) messageElements.push('\n' + '─'.repeat(15) + '\n');
+              const entryText = buildEntryText(work, index, page);
               if (config.showSearchImage) {
                   messageElements.push(h('image', { src: work.mainCoverUrl }));
               }
               messageElements.push(entryText);
           });
-          messageElements.push('\n\n' + footer); 
           await session.send(messageElements);
       }
   }
@@ -782,6 +785,7 @@ export function apply(ctx: Context, config: Config) {
         const payload = {
           keyword: ' ',
           page: currentPage,
+          pageSize: config.pageSize,
           subtitle: 0,
           localSubtitledWorks: [],
           withPlaylistStatus: [],
@@ -812,7 +816,7 @@ export function apply(ctx: Context, config: Config) {
       
       const keywordForApi = keyword.replace(/\//g, '%20');
       const fetcher = (currentPage: number) => {
-        const url = `${config.apiBaseUrl}/search/${keywordForApi}?order=dl_count&sort=desc&page=${currentPage}&pageSize=10&subtitle=0&includeTranslationWorks=true`;
+        const url = `${config.apiBaseUrl}/search/${keywordForApi}?order=dl_count&sort=desc&page=${currentPage}&pageSize=${config.pageSize}&subtitle=0&includeTranslationWorks=true`;
         return ctx.http.get<ApiSearchResponse>(url, requestOptions);
       };
       
