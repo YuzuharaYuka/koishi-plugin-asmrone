@@ -1,4 +1,4 @@
-// --- START OF FILE src/index.ts ---
+// --- START OF FILE src/index.ts --- 
 
 import { Context } from 'koishi'
 import { promises as fs } from 'fs'

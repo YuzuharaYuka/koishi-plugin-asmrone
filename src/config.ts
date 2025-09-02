@@ -1,4 +1,4 @@
-// --- START OF FILE src/config.ts ---
+// --- START OF FILE src/config.ts --- 
 
 import { Schema } from 'koishi'
 import { AccessMode, SendMode, ZipMode, CardModeNonAudioAction } from './common/constants'

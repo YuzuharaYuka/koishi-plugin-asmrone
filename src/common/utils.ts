@@ -1,4 +1,4 @@
-// --- START OF FILE src/common/utils.ts ---
+// --- START OF FILE src/common/utils.ts --- 
 
 import { TrackItem, DisplayItem, ProcessedFile } from './types'
 

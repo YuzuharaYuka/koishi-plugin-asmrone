@@ -1,4 +1,4 @@
-// --- START OF FILE src/commands/search.ts ---
+// --- START OF FILE src/commands/search.ts --- 
 
 import { Context } from 'koishi'
 import { CommandHandler } from './handler'

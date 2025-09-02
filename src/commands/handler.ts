@@ -1,4 +1,4 @@
-// --- START OF FILE src/commands/handler.ts ---
+// --- START OF FILE src/commands/handler.ts --- 
 
 import { Context, Session, h, Logger, Element } from 'koishi'
 import { ApiSearchResponse, BaseWork, DisplayItem } from '../common/types'

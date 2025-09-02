@@ -1,4 +1,4 @@
-// --- START OF FILE src/common/constants.ts ---
+// --- START OF FILE src/common/constants.ts --- 
 
 export const SendMode = {
   CARD: 'card',

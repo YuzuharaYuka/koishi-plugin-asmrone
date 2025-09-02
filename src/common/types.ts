@@ -1,4 +1,4 @@
-// --- START OF FILE src/common/types.ts ---
+// --- START OF FILE src/common/types.ts --- 
 
 import type Puppeteer from 'koishi-plugin-puppeteer'
 

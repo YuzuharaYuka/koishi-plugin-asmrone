@@ -1,4 +1,4 @@
-// --- START OF FILE src/services/renderer.ts ---
+// --- START OF FILE src/services/renderer.ts --- 
 
 import { Context, h, Logger } from 'koishi'
 import { BaseWork, WorkInfoResponse, DisplayItem } from '../common/types'

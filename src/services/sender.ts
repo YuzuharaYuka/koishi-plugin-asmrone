@@ -1,4 +1,4 @@
-// --- START OF FILE src/services/sender.ts ---
+// --- START OF FILE src/services/sender.ts --- 
 
 import { Context, Session, h, Logger } from 'koishi'
 import { resolve } from 'path'
