@@ -1,12 +1,17 @@
+// --- START OF FILE src/index.ts ---
+
 import { Context } from 'koishi'
 import { promises as fs } from 'fs'
 import { resolve } from 'path'
 import archiver from 'archiver'
-import { Config } from './config'
-import { AsmrApi } from './api'
-import { Renderer } from './renderer'
-import { TrackSender } from './sender'
-import { CommandHandler } from './commands'
+import { Config } from './config' // <- Updated import path
+import { AsmrApi } from './services/api'
+import { Renderer } from './services/renderer'
+import { TrackSender } from './services/sender'
+import { CommandHandler } from './commands/handler'
+import { registerPopularCommand } from './commands/popular'
+import { registerSearchCommand } from './commands/search'
+import { registerListenCommand } from './commands/listen'
 
 // 外部依赖注册
 if (!archiver.isRegisteredFormat('zip-encrypted')) {
@@ -15,7 +20,7 @@ if (!archiver.isRegisteredFormat('zip-encrypted')) {
 
 export const name = 'asmrone'
 export const inject = ['http', 'puppeteer']
-export { Config } from './config'
+export { Config } from './config' // <- Updated export path
 
 export const usage = `
 注意：部分内容可能不适合在所有场合使用 (NSFW)，请在合适的范围内使用本插件。
@@ -77,13 +82,8 @@ export function apply(ctx: Context, config: Config) {
     }
   });
 
-  // 注册命令，并将具体实现委托给 CommandHandler
-  ctx.command('热门音声 [page:number]', '获取当前热门音声列表')
-    .action(async ({ session }, page) => commandHandler.handlePopular(session, page));
-
-  ctx.command('搜音声 <query:text>', '搜索音声作品')
-    .action(async ({ session }, query) => commandHandler.handleSearch(session, query));
-
-  ctx.command('听音声 <query:text>', '获取并收听音声')
-    .action(async ({ session }, query) => commandHandler.handleListen(session, query));
+  // 注册所有指令
+  registerPopularCommand(ctx, commandHandler);
+  registerSearchCommand(ctx, commandHandler);
+  registerListenCommand(ctx, commandHandler);
 }

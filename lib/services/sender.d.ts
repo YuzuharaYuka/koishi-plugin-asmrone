@@ -1,6 +1,7 @@
 import { Context, Session } from 'koishi';
-import { Config, SendMode } from './config';
-import { ProcessedFile, WorkInfoResponse } from './types';
+import { ProcessedFile, WorkInfoResponse } from '../common/types';
+import { Config } from '../config';
+import { SendMode } from '../common/constants';
 export declare class TrackSender {
     private ctx;
     private config;

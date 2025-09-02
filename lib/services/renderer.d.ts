@@ -1,6 +1,6 @@
 import { Context } from 'koishi';
-import { BaseWork, WorkInfoResponse, DisplayItem } from './types';
-import { Config } from './config';
+import { BaseWork, WorkInfoResponse, DisplayItem } from '../common/types';
+import { Config } from '../config';
 export declare class Renderer {
     private ctx;
     private logger;
