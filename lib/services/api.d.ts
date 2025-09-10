@@ -5,8 +5,12 @@ export declare class AsmrApi {
     private ctx;
     private config;
     private requestOptions;
+    private cache;
     constructor(ctx: Context, config: Config);
-    search(keyword: string, page: number): Promise<ApiSearchResponse>;
+    private cleanExpiredCache;
+    private _fetchAndCache;
+    private _requestWithRetry;
+    search(keyword: string, page: number, order?: string, sort?: string): Promise<ApiSearchResponse>;
     getPopular(page: number): Promise<ApiSearchResponse>;
     getWorkInfo(rid: string): Promise<WorkInfoResponse>;
     getTracks(rid: string): Promise<TrackItem[]>;

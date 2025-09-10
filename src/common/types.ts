@@ -9,18 +9,29 @@ declare module 'koishi' {
   }
 }
 
-// Config interface has been moved to src/config.ts to fix the build error.
+// [MODIFIED] 补充了 id 字段，使其更完整
+export interface Tag { 
+  id: number;
+  name: string;
+  i18n?: any; // i18n 结构复杂，暂时定义为 any
+}
 
-export interface Tag { name: string }
-export interface Va { name:string }
+// [MODIFIED] 补充了 id 字段，使其更完整
+export interface Va { 
+  id: string;
+  name:string;
+}
 
+// [MODIFIED] 补充了 price 和 review_count 字段
 export interface BaseWork {
   id: number;
   title: string;
-  name: string;
+  name: string; // circle name
   mainCoverUrl: string;
   release: string;
   dl_count: number;
+  price: number;
+  review_count: number;
   rate_average_2dp: number;
   rate_count: number;
   vas: Va[];
@@ -29,11 +40,13 @@ export interface BaseWork {
   source_url: string;
 }
 
+// [MODIFIED] 补全了 pagination 的字段
 export interface ApiSearchResponse {
   works: BaseWork[];
   pagination: {
     totalCount: number;
     currentPage: number;
+    pageSize: number;
   };
 }
 
@@ -48,17 +61,15 @@ export interface TrackItem {
 
 export type WorkInfoResponse = BaseWork;
 
-// Represents any downloadable file, now with its full path.
 export type ProcessedFile = {
   title: string;
-  path: string; // The full relative path for use in ZIP archives.
+  path: string;
   url: string;
   type: DisplayItem['type'];
   duration?: number;
   size?: number;
 };
 
-// Represents an item in the final display list (for menus).
 export interface DisplayItem {
   title: string;
   type: 'folder' | 'audio' | 'image' | 'video' | 'doc' | 'subtitle' | 'unknown';
@@ -67,5 +78,13 @@ export interface DisplayItem {
   meta: string;
 }
 
-// Represents a user-selected, valid file for download.
 export type ValidFile = { index: number; file: ProcessedFile };
+
+export interface AdvancedSearchParams {
+    keyword: string;
+    page: number;
+    order?: string;
+    sort?: string;
+    include: Record<string, string[]>;
+    exclude: Record<string, string[]>;
+}

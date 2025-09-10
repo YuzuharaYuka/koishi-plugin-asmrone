@@ -9,6 +9,8 @@ export declare class TrackSender {
     private logger;
     private requestOptions;
     constructor(ctx: Context, config: Config, tempDir: string);
+    private _downloadWithRetry;
+    private downloadFilesWithConcurrency;
     processAndSendTracks(indices: number[], allFiles: ProcessedFile[], workInfo: WorkInfoResponse, session: Session, mode: SendMode): Promise<void>;
     private _sendAsCard;
     private _sendAsFile;

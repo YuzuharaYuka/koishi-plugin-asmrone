@@ -1,12 +1,12 @@
 {
   "name": "koishi-plugin-asmrone",
-  "description": "利用 asmr.one API，提供在聊天平台中搜索、获取信息并收听 ASMR 音声作品的功能。优化文件夹内容处理",
-  "version": "1.4.9",
+  "description": "利用 asmr.one API，提供在聊天平台中搜索、获取详情并收听 ASMR 音声作品的功能。添加搜索筛选功能。",
+  "version": "1.6.2",
   "homepage": "https://github.com/YuzuharaYuka/koishi-plugin-asmrone",
   "repository": {
-	"type": "git",
-	"url": "git+https://github.com/YuzuharaYuka/koishi-plugin-asmrone.git"
-	},
+    "type": "git",
+    "url": "git+https://github.com/YuzuharaYuka/koishi-plugin-asmrone.git"
+  },
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -15,16 +15,15 @@
   "license": "MIT",
   "dependencies": {
     "archiver": "^7.0.1",
-    "archiver-zip-encrypted": "^2.0.0"
+    "archiver-zip-encrypted": "^2.0.0",
+    "pureimage": "^0.4.18"
   },
-  "scripts": {},
   "keywords": [
     "asmr",
     "chatbot",
     "koishi",
     "plugin"
   ],
-  "devDependencies": {},
   "peerDependencies": {
     "koishi": "^4.18.7",
     "koishi-plugin-puppeteer": "*"

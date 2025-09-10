@@ -3,6 +3,7 @@ import { Config } from '../config';
 import { AsmrApi } from '../services/api';
 import { Renderer } from '../services/renderer';
 import { TrackSender } from '../services/sender';
+export declare const orderKeys: string[];
 export declare class CommandHandler {
     private ctx;
     private config;
@@ -15,6 +16,7 @@ export declare class CommandHandler {
     isAccessAllowed(session: Session): boolean;
     isInteractionActive(session: Session): boolean;
     handlePopular(session: Session, page?: number): Promise<void>;
+    private parseAdvancedSearch;
     handleSearch(session: Session, query: string): Promise<void>;
     handleListen(session: Session, query: string): Promise<void>;
     private handleWorkSelection;

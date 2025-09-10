@@ -1,13 +1,28 @@
 // --- START OF FILE src/commands/handler.ts --- 
 
 import { Context, Session, h, Logger, Element } from 'koishi'
-import { ApiSearchResponse, BaseWork, DisplayItem } from '../common/types'
-import { Config } from '../config' // <- Updated import path
+import { ApiSearchResponse, BaseWork, DisplayItem, AdvancedSearchParams } from '../common/types'
+import { Config } from '../config'
 import { AsmrApi } from '../services/api'
 import { Renderer } from '../services/renderer'
 import { TrackSender } from '../services/sender'
 import { formatRjCode, formatWorkDuration, processFileTree, parseTrackIndices } from '../common/utils'
 import { AccessMode, SendMode } from '../common/constants'
+
+const orderMap: Record<string, { order: string; sort: string }> = {
+  '发售日': { order: 'release', sort: 'desc' },
+  '最新收录': { order: 'create_date', sort: 'desc' },
+  '发售日-正序': { order: 'release', sort: 'asc' },
+  '销量': { order: 'dl_count', sort: 'desc' },
+  '价格-正序': { order: 'price', sort: 'asc' },
+  '价格': { order: 'price', sort: 'desc' },
+  '评分': { order: 'rate_average_2dp', sort: 'desc' },
+  '评价数': { order: 'review_count', sort: 'desc' },
+  'RJ号': { order: 'id', sort: 'desc' },
+  'RJ号-正序': { order: 'id', sort: 'asc' },
+  '随机': { order: 'random', sort: 'desc' },
+};
+export const orderKeys = Object.keys(orderMap);
 
 
 export class CommandHandler {
@@ -41,9 +56,9 @@ export class CommandHandler {
     return false;
   }
   
-  async handlePopular(session: Session, page = 1) {
+  async handlePopular(session: Session, page: number = 1) {
     if (!this.isAccessAllowed(session) || this.isInteractionActive(session)) return;
-    
+
     const interactionKey = `${session.platform}:${session.userId}`;
     this.activeInteractions.add(interactionKey);
     
@@ -51,6 +66,50 @@ export class CommandHandler {
     const onNextPage = (nextSession: Session, nextPage: number) => this.handleListInteraction(nextSession, nextPage, fetcher, '热门音声', onNextPage);
     
     await this.handleListInteraction(session, page, fetcher, '热门音声', onNextPage);
+  }
+
+  private parseAdvancedSearch(query: string): AdvancedSearchParams {
+    const args = query.trim().split(/\s+/);
+    const params: AdvancedSearchParams = {
+        keyword: '',
+        page: 1,
+        include: {},
+        exclude: {},
+    };
+    const keywords: string[] = [];
+    const validKeys = ['tag', 'va', 'circle', 'rate', 'price', 'sell', 'duration', 'age', 'lang', 'order'];
+
+    for (const arg of args) {
+      if (/^\d+$/.test(arg) && !arg.includes(':')) {
+          params.page = parseInt(arg, 10);
+          continue;
+      }
+
+      const match = arg.match(/^(-)?([a-zA-Z]+):(.*)$/);
+      if (match) {
+        const [, excludeFlag, key, value] = match;
+        if (validKeys.includes(key) && value) {
+            if (key === 'order') {
+                const mapping = orderMap[value];
+                if (mapping) {
+                    params.order = mapping.order;
+                    params.sort = mapping.sort;
+                }
+                continue;
+            }
+
+            const target = excludeFlag ? params.exclude : params.include;
+            if (!target[key]) target[key] = [];
+            target[key].push(value);
+            continue;
+        }
+      }
+      
+      keywords.push(arg);
+    }
+
+    params.keyword = keywords.join(' ');
+    return params;
   }
 
   async handleSearch(session: Session, query: string) {
@@ -61,17 +120,37 @@ export class CommandHandler {
     }
     if (this.isInteractionActive(session)) return;
 
+    const searchParams = this.parseAdvancedSearch(query);
+    
+    const apiKeywordParts: string[] = [];
+    if (searchParams.keyword) {
+      apiKeywordParts.push(searchParams.keyword);
+    }
+
+    const numericKeys = ['rate', 'price', 'sell', 'duration'];
+    for (const key in searchParams.include) {
+      for (let value of searchParams.include[key]) {
+        if (numericKeys.includes(key)) {
+          const match = value.match(/(\d+(\.\d+)?)$/);
+          if (match) value = match[0];
+        }
+        apiKeywordParts.push(`$${key}:${value}$`);
+      }
+    }
+    for (const key in searchParams.exclude) {
+      for (const value of searchParams.exclude[key]) {
+        apiKeywordParts.push(`$-${key}:${value}$`);
+      }
+    }
+    const apiKeyword = apiKeywordParts.join(' ');
+
     const interactionKey = `${session.platform}:${session.userId}`;
     this.activeInteractions.add(interactionKey);
 
-    const args = query.trim().split(/\s+/);
-    const keyword = args[0];
-    const page = args[1] && /^\d+$/.test(args[1]) ? parseInt(args[1], 10) : 1;
+    const fetcher = (p: number) => this.api.search(apiKeyword, p, searchParams.order, searchParams.sort);
+    const onNextPage = (nextSession: Session, nextPage: number) => this.handleListInteraction(nextSession, nextPage, fetcher, query, onNextPage);
 
-    const fetcher = (p: number) => this.api.search(keyword, p);
-    const onNextPage = (nextSession: Session, nextPage: number) => this.handleListInteraction(nextSession, nextPage, fetcher, keyword, onNextPage);
-
-    await this.handleListInteraction(session, page, fetcher, keyword, onNextPage);
+    await this.handleListInteraction(session, searchParams.page, fetcher, query, onNextPage);
   }
 
   async handleListen(session: Session, query: string) {
@@ -112,12 +191,8 @@ export class CommandHandler {
           const { processedFiles } = processFileTree(trackData);
           await this.sender.processAndSendTracks(uniqueIndices, processedFiles, workInfo, session, userOption || this.config.defaultSendMode);
       } catch (error) {
-          if (this.ctx.http.isError(error) && error.response?.status === 404) {
-            await session.send('未找到该作品。');
-            return;
-          }
           this.logger.error(error);
-          await session.send('查询失败：内部错误。');
+          await session.send(`查询失败：${error.message}`);
           return;
       }
     } else {
@@ -128,21 +203,20 @@ export class CommandHandler {
   private async handleWorkSelection(session: Session, rjCode: string) {
     const rid = rjCode.substring(2);
     try {
-      await session.send(`查询中：${rjCode}...`);
-      const [workInfo, trackData] = await Promise.all([this.api.getWorkInfo(rid), this.api.getTracks(rid)]);
-      if (!workInfo || !trackData) {
-        await session.send('获取信息失败。');
-        return;
-      }
+      await session.send(`正在查询作品详情：${h.escape(rjCode)}...`);
+      const workInfo = await this.api.getWorkInfo(rid);
+      const trackData = await this.api.getTracks(rid);
 
       const { displayItems, processedFiles } = processFileTree(trackData);
+      
+      await this.sendWorkInfo(session, workInfo, displayItems, rjCode);
+      
       if (processedFiles.length === 0) {
         await session.send('该作品无可下载文件。');
         return;
       }
       
-      await this.sendWorkInfo(session, workInfo, displayItems, rjCode);
-      await session.send(`请在 ${this.config.interactionTimeout} 秒内回复序号 (如 1 3-5 [模式]) 或 N 取消。模式可选card|file|zip`);
+      await session.send(`请在 ${this.config.interactionTimeout} 秒内回复音轨序号进行收听 (如 1 3-5 [模式])，或回复 N 取消。`);
       
       const interactionKey = `${session.platform}:${session.userId}`;
       this.activeInteractions.add(interactionKey);
@@ -150,12 +224,16 @@ export class CommandHandler {
       const timer = setTimeout(() => {
         this.activeInteractions.delete(interactionKey);
         dispose();
-        session.send('操作超时。');
+        session.send('操作超时，已自动取消。');
       }, this.config.interactionTimeout * 1000);
 
       const dispose = this.ctx.middleware(async (midSession, next) => {
         if (midSession.userId !== session.userId || midSession.channelId !== session.channelId) return next();
         
+        clearTimeout(timer);
+        dispose();
+        this.activeInteractions.delete(interactionKey);
+
         try {
           const choice = midSession.content.trim().toLowerCase();
           if (choice === 'n' || choice === '取消') {
@@ -172,7 +250,7 @@ export class CommandHandler {
           const uniqueIndices = parseTrackIndices(replyArgs);
           
           if (uniqueIndices.length === 0) {
-            await midSession.send('输入无效，操作取消。');
+            await midSession.send('输入无效，操作已取消。');
             return;
           }
           
@@ -180,38 +258,37 @@ export class CommandHandler {
 
         } catch (error) {
             this.logger.error('处理用户交互时发生错误: %o', error);
-            await midSession.send('交互失败：内部错误。');
-        } finally {
-            this.activeInteractions.delete(interactionKey);
-            dispose();
-            clearTimeout(timer);
+            await midSession.send(`交互处理失败：${error.message}`);
         }
       }, true);
 
     } catch (error) {
-      if (this.ctx.http.isError(error) && error.response?.status === 404) {
-        await session.send('未找到该作品。');
-      } else {
-        this.logger.error(error);
-        await session.send('查询失败：内部错误。');
-      }
+        this.logger.error(`获取作品 ${rjCode} 失败: %o`, error);
+        await session.send(`查询失败：${error.message}`);
     }
   }
 
   private async handleListInteraction(session: Session, page: number, fetcher: (p: number) => Promise<ApiSearchResponse>, listTitle: string, onNextPage: (s: Session, p: number) => Promise<void>) {
     const interactionKey = `${session.platform}:${session.userId}`;
     try {
-      await session.send(`获取中... (${listTitle} - P${page})`);
+      const actionText = listTitle === '热门音声' ? '正在获取' : '正在搜索';
+      const titleText = listTitle === '热门音声' ? '热门音声' : `“${h.escape(listTitle)}”`;
+      await session.send(`${actionText}${titleText} (第 ${page} 页)...`);
+      
       const data = await fetcher(page);
 
       if (!data?.works?.length) {
-          await session.send(data?.pagination?.totalCount === 0 ? '未找到结果。' : '无更多结果。');
+          await session.send(data?.pagination?.totalCount === 0 ? '未找到任何结果。' : '没有更多结果了。');
           this.activeInteractions.delete(interactionKey);
           return;
       }
       
       if (this.config.useImageMenu && this.ctx.puppeteer) {
-        const html = this.renderer.createSearchHtml(data.works, listTitle, page, data.pagination.totalCount, this.config);
+        const worksWithEmbeddedImages = await Promise.all(data.works.map(async (work) => {
+            const dataUri = await this.api.downloadImageAsDataUri(work.mainCoverUrl);
+            return { ...work, mainCoverUrl: dataUri || work.mainCoverUrl };
+        }));
+        const html = this.renderer.createSearchHtml(worksWithEmbeddedImages, listTitle, page, data.pagination.totalCount);
         const imageBuffer = await this.renderer.renderHtmlToImage(html);
         if (imageBuffer) await session.send(h.image(imageBuffer, 'image/png'));
         else await this.sendSearchTextResult(session, data, page);
@@ -219,19 +296,18 @@ export class CommandHandler {
         await this.sendSearchTextResult(session, data, page);
       }
 
-      await session.send(`请在 ${this.config.interactionTimeout} 秒内回复序号选择，F 翻页，N 取消。`);
+      await session.send(`请在 ${this.config.interactionTimeout} 秒内回复【序号】选择作品，【F】翻页，或【N】取消。`);
 
       const timer = setTimeout(() => {
         this.activeInteractions.delete(interactionKey);
         dispose();
-        session.send('操作超时。');
+        session.send('操作超时，已自动取消。');
       }, this.config.interactionTimeout * 1000);
 
       const dispose = this.ctx.middleware(async (midSession, next) => {
         if (midSession.userId !== session.userId || midSession.channelId !== session.channelId) return next();
         
         const content = midSession.content.trim().toLowerCase();
-        
         const choice = parseInt(content, 10);
         const localIndex = choice - (page - 1) * this.config.pageSize;
         const isChoiceInvalid = isNaN(choice) || localIndex < 1 || localIndex > data.works.length;
@@ -239,6 +315,10 @@ export class CommandHandler {
         if (content !== 'f' && content !== 'n' && content !== '取消' && isChoiceInvalid) {
             return next();
         }
+
+        clearTimeout(timer);
+        dispose();
+        this.activeInteractions.delete(interactionKey);
 
         try {
             if (content === 'f') {
@@ -251,40 +331,35 @@ export class CommandHandler {
             }
             
             const selectedWork = data.works[localIndex - 1];
-            this.handleWorkSelection(midSession, `RJ${String(selectedWork.id).padStart(8, '0')}`);
+            await this.handleWorkSelection(midSession, `RJ${String(selectedWork.id).padStart(8, '0')}`);
 
         } catch (error) {
             this.logger.error('处理列表交互时发生错误: %o', error);
-            await midSession.send('交互失败：内部错误。');
-        } finally {
-            this.activeInteractions.delete(interactionKey);
-            dispose();
-            clearTimeout(timer);
+            await midSession.send(`交互处理失败：${error.message}`);
         }
       }, true);
       
     } catch (error) {
       this.logger.error('获取列表时发生内部错误: %o', error);
-      await session.send('列表获取失败：内部错误。');
+      await session.send(`列表获取失败：${error.message}`);
       this.activeInteractions.delete(interactionKey);
     }
   }
 
-  // sendWorkInfo 和 sendSearchTextResult 中的文本保持不变，因为它们是数据展示的主体，精简会导致信息丢失。
-  // ... (sendWorkInfo, sendWorkInfoAsText, sendSearchTextResult 方法保持原样)
   private async sendWorkInfo(session: Session, workInfo: BaseWork, displayItems: DisplayItem[], rjCode: string) {
     if (this.config.useImageMenu && this.ctx.puppeteer) {
-      let linksHtml = '';
-      if (this.config.showLinks) {
-        const asmrOneUrl = `https://asmr.one/work/${rjCode}`;
-        linksHtml = `<div class="links"><span><strong>ASMR.one:</strong> <a href="${asmrOneUrl}">${h.escape(asmrOneUrl)}</a></span>${workInfo.source_url ? `<span><strong>DLsite:</strong> <a href="${workInfo.source_url}">${h.escape(workInfo.source_url)}</a></span>` : ''}</div>`;
-      }
-      const html = this.renderer.createWorkInfoHtml(workInfo, displayItems, linksHtml);
-      const imageBuffer = await this.renderer.renderHtmlToImage(html);
-      if (imageBuffer) {
-        await session.send(h.image(imageBuffer, 'image/png'));
-        return;
-      }
+        const coverDataUri = await this.api.downloadImageAsDataUri(workInfo.mainCoverUrl);
+        const workInfoWithEmbeddedImage = {
+            ...workInfo,
+            mainCoverUrl: coverDataUri || workInfo.mainCoverUrl,
+        };
+
+        const html = this.renderer.createWorkInfoHtml(workInfoWithEmbeddedImage, displayItems, '');
+        const imageBuffer = await this.renderer.renderHtmlToImage(html);
+        if (imageBuffer) {
+            await session.send(h.image(imageBuffer, 'image/png'));
+            return;
+        }
     }
     await this.sendWorkInfoAsText(session, workInfo, displayItems, rjCode);
   }

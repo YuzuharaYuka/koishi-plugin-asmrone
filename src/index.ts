@@ -4,72 +4,77 @@ import { Context } from 'koishi'
 import { promises as fs } from 'fs'
 import { resolve } from 'path'
 import archiver from 'archiver'
-import { Config } from './config' // <- Updated import path
+import { Config } from './config'
 import { AsmrApi } from './services/api'
 import { Renderer } from './services/renderer'
 import { TrackSender } from './services/sender'
-import { CommandHandler } from './commands/handler'
+import { CommandHandler, orderKeys } from './commands/handler'
 import { registerPopularCommand } from './commands/popular'
 import { registerSearchCommand } from './commands/search'
 import { registerListenCommand } from './commands/listen'
 
-// 外部依赖注册
 if (!archiver.isRegisteredFormat('zip-encrypted')) {
   archiver.registerFormat('zip-encrypted', require("archiver-zip-encrypted"));
 }
 
 export const name = 'asmrone'
 export const inject = ['http', 'puppeteer']
-export { Config } from './config' // <- Updated export path
+export { Config } from './config'
 
 export const usage = `
-注意：部分内容可能不适合在所有场合使用 (NSFW)，请在合适的范围内使用本插件。
+##	注意：部分内容可能不适合在所有场合使用 (NSFW)，请在合适的范围内使用本插件。
+
+---
+##	指令用法
+\n\n<>为必需项，[]为可选项
+### 搜音声 <关键词> [筛选条件] [排序方式] [页码]
+根据关键词搜索并获取音声列表。\n\n
+*	关键词: 直接输入，多个词用空格分隔。
+*	筛选条件: 使用 key:value 格式。
+*	排序条件: 使用 order:排序值 格式。
+*	页码: 指令末尾的单个数字。
+- **示例**: \`搜音声 山田 tag:舔耳 order:发售日 2\`
+
+*	**详细参数说明请使用\`help 搜音声\`查询**
+
+### 热门音声 [页码]
+获取当前热门作品列表。可包含页码。
+- **示例**: \`热门音声 3\`
+
+### 听音声 <RJ号> [音轨序号] [发送方式]
+获取作品信息并发送音轨。\n\n
+*	音轨序号: 支持单个或多个序号，如\`1 2 3,1-10\`
+*	发送方式: 可选 \`card\` \`file\` \`zip\`，分别对应音乐卡片，文件，压缩包模式
+- **获取详情**: \`听音声 RJ01234567\`
+- **直接下载**: \`听音声 RJ01234567 1 3-5 zip\`
 
 ---
 
-### 搜音声 <关键词> [页数]
-搜索音声作品
-- **关键词**: 必需。 多个标签请用 / 分割。
-- **页数**: 可选。 结果的页码。
-- **示例**: \`搜音声 催眠/JK 2\`
+#### **高级筛选**
+- **语法**: \`key:value\`，在 key 前加 \`-\` 为排除该条件。
+- **可用 key**: \`tag\`(标签), \`va\`(声优), \`circle\`(社团), \`rate\`(评分), \`sell\`(销量), \`price\`(价格), \`age\`(年龄分级), \`lang\`(语言)。
+- **排序**: 使用 \`order:排序值\`，默认按销量排序。可用值: ${orderKeys.join(', ')}。
 
-### 热门音声 [页数]
-获取当前热门作品列表
-- **页数**: 可选。 结果的页码。
-- **示例**: \`热门音声 2\`
-
-### 听音声 <RJ号> [音轨序号...] [选项]
-获取作品信息并发送音轨
-- **RJ号**: 必需。 作品ID, 如 \`RJ01234567\` 或 \`123456\`。
-- **音轨序号**: 可选。 一个或多个音轨的数字序号, 用空格分隔。
-- **选项**: 可选。 发送方式 \`card\` | \`file\` | \`zip\`。若省略则使用默认配置。
-
-**使用方式:**
-1. 获取详情 (等待交互): \`听音声 RJ01234567\`
-2. 直接获取指定音轨并发送压缩包: \`听音声 RJ01234567 1 3 5 zip\`
-
-**交互说明:**
-- 在列表指令后, 可回复【序号】选择, 回复【f】翻页。
-- 所有交互均可通过回复【n/取消】来中断。
+#### **交互说明**
+- **列表页**: 回复【序号】选择，【F】翻页，【N】取消。
+- **详情页**: 回复【音轨序号】下载，【N】取消。
 
 ---
 
-**注意:**
-- 发送图片或文件失败通常由平台风控导致。
-- 音乐卡片(card)模式可能需要签名服务, 且仅在部分适配器 (如 OneBot) 上可用。
+###	注意：
+*	**音乐卡片card模式需要配置音乐签名服务url，且仅在QQ平台可用，请确保bot使用的框架配置支持。**
+*	**发送图片或文件失败，大概率是由平台风控导致，请尽量使用图片菜单，发送方式选择card或zip加密模式。**
 `
 
 export function apply(ctx: Context, config: Config) {
   const logger = ctx.logger('asmrone');
   const tempDir = resolve(ctx.baseDir, 'temp', 'asmrone');
 
-  // 初始化各个服务模块
   const api = new AsmrApi(ctx, config);
-  const renderer = new Renderer(ctx);
+  const renderer = new Renderer(ctx, config);
   const sender = new TrackSender(ctx, config, tempDir);
   const commandHandler = new CommandHandler(ctx, config, api, renderer, sender);
 
-  // 插件启动时的准备工作
   ctx.on('ready', async () => {
     try {
       await fs.mkdir(tempDir, { recursive: true });
@@ -82,7 +87,6 @@ export function apply(ctx: Context, config: Config) {
     }
   });
 
-  // 注册所有指令
   registerPopularCommand(ctx, commandHandler);
   registerSearchCommand(ctx, commandHandler);
   registerListenCommand(ctx, commandHandler);

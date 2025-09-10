@@ -5,9 +5,12 @@ declare module 'koishi' {
     }
 }
 export interface Tag {
+    id: number;
     name: string;
+    i18n?: any;
 }
 export interface Va {
+    id: string;
     name: string;
 }
 export interface BaseWork {
@@ -17,6 +20,8 @@ export interface BaseWork {
     mainCoverUrl: string;
     release: string;
     dl_count: number;
+    price: number;
+    review_count: number;
     rate_average_2dp: number;
     rate_count: number;
     vas: Va[];
@@ -29,6 +34,7 @@ export interface ApiSearchResponse {
     pagination: {
         totalCount: number;
         currentPage: number;
+        pageSize: number;
     };
 }
 export interface TrackItem {
@@ -59,3 +65,11 @@ export type ValidFile = {
     index: number;
     file: ProcessedFile;
 };
+export interface AdvancedSearchParams {
+    keyword: string;
+    page: number;
+    order?: string;
+    sort?: string;
+    include: Record<string, string[]>;
+    exclude: Record<string, string[]>;
+}

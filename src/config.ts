@@ -3,7 +3,17 @@
 import { Schema } from 'koishi'
 import { AccessMode, SendMode, ZipMode, CardModeNonAudioAction } from './common/constants'
 
-// The Config interface is defined here to merge with the const Config Schema.
+export interface ImageMenuSettings {
+  backgroundColor: string;
+  itemBackgroundColor: string;
+  textColor: string;
+  titleColor: string;
+  accentColor: string;
+  highlightColor: string;
+  enableAntiCensorship: boolean;
+  imageRenderScale: number;
+}
+
 export interface Config {
   useForward: boolean;
   showSearchImage: boolean;
@@ -11,24 +21,26 @@ export interface Config {
   showLinks: boolean;
   pageSize: number;
   interactionTimeout: number;
+  maxRetries: number;
+  imageMenu: ImageMenuSettings;
   accessMode: AccessMode;
   whitelist: string[];
   blacklist: string[];
   defaultSendMode: SendMode;
   cardModeNonAudioAction: CardModeNonAudioAction;
   downloadTimeout: number;
+  downloadConcurrency: number;
   apiBaseUrl: string;
   usePassword: boolean;
   password: string;
   zipMode: ZipMode;
+  zipCompressionLevel: number; // New field
   debug: boolean;
   prependRjCodeCard: boolean;
   prependRjCodeFile: boolean;
   prependRjCodeZip: boolean;
 }
 
-// By removing the type annotation `: Schema<Config>` and relying on the `as` assertion,
-// we override TypeScript's faulty inference for complex schemas.
 export const Config = Schema.intersect([
     Schema.object({
         apiBaseUrl: Schema.union([
@@ -44,7 +56,22 @@ export const Config = Schema.intersect([
         showLinks: Schema.boolean().default(false).description('在详情中显示 asmr.one/DLsite 链接。'),
         pageSize: Schema.number().min(1).max(40).default(10).description('每页结果数量 (1-40)。'),
         interactionTimeout: Schema.number().min(15).default(60).description('交互操作超时时间 (秒)。'),
+        maxRetries: Schema.number().min(1).max(5).default(3).description('API 请求及文件下载失败时的最大重试次数。'),
     }).description('基础设置'),
+
+    Schema.object({
+        imageMenu: Schema.object({
+            backgroundColor: Schema.string().role('color').default('#1e1e1e').description('整体背景色。'),
+            itemBackgroundColor: Schema.string().role('color').default('#252526').description('项目/卡片背景色。'),
+            textColor: Schema.string().role('color').default('#f0f0f0').description('主要文本颜色。'),
+            titleColor: Schema.string().role('color').default('#9cdcfe').description('作品标题颜色。'),
+            accentColor: Schema.string().role('color').default('#4ec9b0').description('主题强调色 (用于页头、边框)。'),
+            highlightColor: Schema.string().role('color').default('#c586c0').description('高亮颜色 (用于序号)。'),
+            enableAntiCensorship: Schema.boolean().default(true).description('启用抗审查 (添加随机噪声)。会增加图片生成耗时。'),
+            imageRenderScale: Schema.number().min(0.1).max(3).step(0.1).default(1).description('图片渲染质量 (缩放比例)。越高越清晰，但生成速度越慢。'),
+        }).description('图片菜单设置')
+    }),
+
     Schema.object({
         accessMode: Schema.union([
             Schema.const(AccessMode.ALL).description('所有群聊均可使用'),
@@ -65,6 +92,7 @@ export const Config = Schema.intersect([
             Schema.const(CardModeNonAudioAction.FALLBACK).description('转为 file 模式发送'),
         ]).default(CardModeNonAudioAction.SKIP).description('Card模式下对非音频文件的操作。'),
         downloadTimeout: Schema.number().default(300).description('单文件下载超时 (秒)。'),
+        downloadConcurrency: Schema.number().min(1).max(10).default(3).description('同时下载文件的最大数量。'),
     }).description('下载与发送设置'),
     Schema.object({
         prependRjCodeCard: Schema.boolean().default(false).description('Card 标题添加 RJ 号。'),
@@ -76,6 +104,7 @@ export const Config = Schema.intersect([
             Schema.const(ZipMode.SINGLE).description('合并为一包'),
             Schema.const(ZipMode.MULTIPLE).description('每轨一包'),
         ]).default(ZipMode.SINGLE).description('多文件压缩方式 (对所有 zip 发送生效)。'),
+        zipCompressionLevel: Schema.number().min(0).max(9).default(1).description('ZIP 压缩级别 (0不压缩, 1最快, 9最高)。级别越高，文件越小但速度越慢。'),
         usePassword: Schema.boolean().default(false).description('Zip 是否加密。'),
     }).description('压缩包设置'),
     Schema.union([
