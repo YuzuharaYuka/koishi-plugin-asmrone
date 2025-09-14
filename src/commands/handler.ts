@@ -1,5 +1,3 @@
-// --- START OF FILE src/commands/handler.ts --- 
-
 import { Context, Session, h, Logger, Element } from 'koishi'
 import { ApiSearchResponse, BaseWork, DisplayItem, AdvancedSearchParams } from '../common/types'
 import { Config } from '../config'
@@ -22,6 +20,7 @@ const orderMap: Record<string, { order: string; sort: string }> = {
   'RJ号-正序': { order: 'id', sort: 'asc' },
   '随机': { order: 'random', sort: 'desc' },
 };
+// [FIXED] 导出 orderKeys，以便其他文件可以导入和使用
 export const orderKeys = Object.keys(orderMap);
 
 
@@ -58,9 +57,6 @@ export class CommandHandler {
   
   async handlePopular(session: Session, page: number = 1) {
     if (!this.isAccessAllowed(session) || this.isInteractionActive(session)) return;
-
-    const interactionKey = `${session.platform}:${session.userId}`;
-    this.activeInteractions.add(interactionKey);
     
     const fetcher = (p: number) => this.api.getPopular(p);
     const onNextPage = (nextSession: Session, nextPage: number) => this.handleListInteraction(nextSession, nextPage, fetcher, '热门音声', onNextPage);
@@ -144,9 +140,6 @@ export class CommandHandler {
     }
     const apiKeyword = apiKeywordParts.join(' ');
 
-    const interactionKey = `${session.platform}:${session.userId}`;
-    this.activeInteractions.add(interactionKey);
-
     const fetcher = (p: number) => this.api.search(apiKeyword, p, searchParams.order, searchParams.sort);
     const onNextPage = (nextSession: Session, nextPage: number) => this.handleListInteraction(nextSession, nextPage, fetcher, query, onNextPage);
 
@@ -161,28 +154,28 @@ export class CommandHandler {
     }
     if (this.isInteractionActive(session)) return;
 
-    const args = query.trim().split(/\s+/).filter(Boolean);
-    const formattedRjCode = formatRjCode(args[0]);
-    if (!formattedRjCode) {
-      await session.send('RJ 号格式错误。');
-      return;
-    }
-    
-    const optionKeywords: SendMode[] = [SendMode.CARD, SendMode.FILE, SendMode.ZIP];
-    let userOption: SendMode = null;
-    
-    const potentialOption = args[args.length - 1];
-    if (optionKeywords.includes(potentialOption as SendMode)) {
-      userOption = potentialOption as SendMode;
-      args.pop();
-    }
-    
-    const selectionArgs = args.slice(1);
-    const uniqueIndices = parseTrackIndices(selectionArgs);
+    try {
+        const args = query.trim().split(/\s+/).filter(Boolean);
+        const formattedRjCode = formatRjCode(args[0]);
+        if (!formattedRjCode) {
+          await session.send('RJ 号格式错误。');
+          return;
+        }
+        
+        const optionKeywords: SendMode[] = [SendMode.CARD, SendMode.FILE, SendMode.ZIP, SendMode.LINK, SendMode.VOICE];
+        let userOption: SendMode = null;
+        
+        const potentialOption = args[args.length - 1];
+        if (optionKeywords.includes(potentialOption as SendMode)) {
+          userOption = potentialOption as SendMode;
+          args.pop();
+        }
+        
+        const selectionArgs = args.slice(1);
+        const uniqueIndices = parseTrackIndices(selectionArgs);
 
-    const rid = formattedRjCode.substring(2);
-    if (uniqueIndices.length > 0) {
-      try {
+        if (uniqueIndices.length > 0) {
+          const rid = formattedRjCode.substring(2);
           const [workInfo, trackData] = await Promise.all([this.api.getWorkInfo(rid), this.api.getTracks(rid)]);
           if (!workInfo || !trackData) {
             await session.send('获取信息失败。');
@@ -190,19 +183,21 @@ export class CommandHandler {
           }
           const { processedFiles } = processFileTree(trackData);
           await this.sender.processAndSendTracks(uniqueIndices, processedFiles, workInfo, session, userOption || this.config.defaultSendMode);
-      } catch (error) {
-          this.logger.error(error);
-          await session.send(`查询失败：${error.message}`);
-          return;
-      }
-    } else {
-      await this.handleWorkSelection(session, formattedRjCode);
+        } else {
+          await this.handleWorkSelection(session, formattedRjCode);
+        }
+    } catch (error) {
+        this.logger.error(error);
+        await session.send(`查询失败：${error.message}`);
     }
   }
 
-  private async handleWorkSelection(session: Session, rjCode: string) {
-    const rid = rjCode.substring(2);
+  private async handleWorkSelection(session: Session, rjCode: string, onBack?: () => Promise<void>) {
+    const interactionKey = `${session.platform}:${session.userId}`;
+    this.activeInteractions.add(interactionKey);
+
     try {
+      const rid = rjCode.substring(2);
       await session.send(`正在查询作品详情：${h.escape(rjCode)}...`);
       const workInfo = await this.api.getWorkInfo(rid);
       const trackData = await this.api.getTracks(rid);
@@ -213,26 +208,22 @@ export class CommandHandler {
       
       if (processedFiles.length === 0) {
         await session.send('该作品无可下载文件。');
+        this.activeInteractions.delete(interactionKey);
         return;
       }
       
-      await session.send(`请在 ${this.config.interactionTimeout} 秒内回复音轨序号进行收听 (如 1 3-5 [模式])，或回复 N 取消。`);
-      
-      const interactionKey = `${session.platform}:${session.userId}`;
-      this.activeInteractions.add(interactionKey);
-
-      const timer = setTimeout(() => {
-        this.activeInteractions.delete(interactionKey);
-        dispose();
-        session.send('操作超时，已自动取消。');
-      }, this.config.interactionTimeout * 1000);
+      let promptMessage = `请在 ${this.config.interactionTimeout} 秒内回复【序号】进行收听 (如 1 3-5 [模式]，模式可选 card, file, zip, link, voice)，`;
+      if (onBack) {
+        promptMessage += `【B】返回列表，`;
+      }
+      promptMessage += `或【N】取消。`;
+      await session.send(promptMessage);
 
       const dispose = this.ctx.middleware(async (midSession, next) => {
         if (midSession.userId !== session.userId || midSession.channelId !== session.channelId) return next();
         
         clearTimeout(timer);
         dispose();
-        this.activeInteractions.delete(interactionKey);
 
         try {
           const choice = midSession.content.trim().toLowerCase();
@@ -240,10 +231,16 @@ export class CommandHandler {
             await midSession.send('操作已取消。');
             return;
           }
+
+          if ((choice === 'b' || choice === '返回') && onBack) {
+            await midSession.send('正在返回列表...');
+            await onBack();
+            return;
+          }
           
           const replyArgs = choice.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
           let mode: SendMode = null;
-          if ([SendMode.CARD, SendMode.FILE, SendMode.ZIP].includes(replyArgs[replyArgs.length - 1] as any)) {
+          if ([SendMode.CARD, SendMode.FILE, SendMode.ZIP, SendMode.LINK, SendMode.VOICE].includes(replyArgs[replyArgs.length - 1] as any)) {
             mode = replyArgs.pop() as SendMode;
           }
           
@@ -251,25 +248,35 @@ export class CommandHandler {
           
           if (uniqueIndices.length === 0) {
             await midSession.send('输入无效，操作已取消。');
-            return;
+          } else {
+            await this.sender.processAndSendTracks(uniqueIndices, processedFiles, workInfo, midSession, mode || this.config.defaultSendMode);
           }
-          
-          await this.sender.processAndSendTracks(uniqueIndices, processedFiles, workInfo, midSession, mode || this.config.defaultSendMode);
 
         } catch (error) {
             this.logger.error('处理用户交互时发生错误: %o', error);
             await midSession.send(`交互处理失败：${error.message}`);
+        } finally {
+            this.activeInteractions.delete(interactionKey);
         }
       }, true);
+
+      const timer = setTimeout(() => {
+        dispose();
+        this.activeInteractions.delete(interactionKey);
+        session.send('操作超时，已自动取消。');
+      }, this.config.interactionTimeout * 1000);
 
     } catch (error) {
         this.logger.error(`获取作品 ${rjCode} 失败: %o`, error);
         await session.send(`查询失败：${error.message}`);
+        this.activeInteractions.delete(interactionKey);
     }
   }
 
   private async handleListInteraction(session: Session, page: number, fetcher: (p: number) => Promise<ApiSearchResponse>, listTitle: string, onNextPage: (s: Session, p: number) => Promise<void>) {
     const interactionKey = `${session.platform}:${session.userId}`;
+    this.activeInteractions.add(interactionKey);
+    
     try {
       const actionText = listTitle === '热门音声' ? '正在获取' : '正在搜索';
       const titleText = listTitle === '热门音声' ? '热门音声' : `“${h.escape(listTitle)}”`;
@@ -296,48 +303,53 @@ export class CommandHandler {
         await this.sendSearchTextResult(session, data, page);
       }
 
-      await session.send(`请在 ${this.config.interactionTimeout} 秒内回复【序号】选择作品，【F】翻页，或【N】取消。`);
-
-      const timer = setTimeout(() => {
-        this.activeInteractions.delete(interactionKey);
-        dispose();
-        session.send('操作超时，已自动取消。');
-      }, this.config.interactionTimeout * 1000);
-
+      await session.send(`请在 ${this.config.interactionTimeout} 秒内回复【序号】选择作品，【F】下一页，【P】上一页，或【N】取消。`);
+      
       const dispose = this.ctx.middleware(async (midSession, next) => {
         if (midSession.userId !== session.userId || midSession.channelId !== session.channelId) return next();
         
         const content = midSession.content.trim().toLowerCase();
         const choice = parseInt(content, 10);
         const localIndex = choice - (page - 1) * this.config.pageSize;
-        const isChoiceInvalid = isNaN(choice) || localIndex < 1 || localIndex > data.works.length;
+        const isChoiceValid = !isNaN(choice) && localIndex >= 1 && localIndex <= data.works.length;
         
-        if (content !== 'f' && content !== 'n' && content !== '取消' && isChoiceInvalid) {
+        if (content !== 'f' && content !== 'p' && content !== 'n' && content !== '取消' && !isChoiceValid) {
             return next();
+        }
+
+        if (content === 'p' && page <= 1) {
+            await midSession.send('已经是第一页了。');
+            return;
         }
 
         clearTimeout(timer);
         dispose();
-        this.activeInteractions.delete(interactionKey);
 
         try {
             if (content === 'f') {
                 onNextPage(midSession, page + 1);
-                return;
-            }
-            if (content === 'n' || content === '取消') {
+            } else if (content === 'p') {
+                onNextPage(midSession, page - 1);
+            } else if (content === 'n' || content === '取消') {
                 await midSession.send('操作已取消。');
-                return;
+                this.activeInteractions.delete(interactionKey);
+            } else if (isChoiceValid) {
+                const selectedWork = data.works[localIndex - 1];
+                const onBack = () => this.handleListInteraction(midSession, page, fetcher, listTitle, onNextPage);
+                await this.handleWorkSelection(midSession, `RJ${String(selectedWork.id).padStart(8, '0')}`, onBack);
             }
-            
-            const selectedWork = data.works[localIndex - 1];
-            await this.handleWorkSelection(midSession, `RJ${String(selectedWork.id).padStart(8, '0')}`);
-
         } catch (error) {
             this.logger.error('处理列表交互时发生错误: %o', error);
             await midSession.send(`交互处理失败：${error.message}`);
+            this.activeInteractions.delete(interactionKey);
         }
       }, true);
+
+      const timer = setTimeout(() => {
+        dispose();
+        this.activeInteractions.delete(interactionKey);
+        session.send('操作超时，已自动取消。');
+      }, this.config.interactionTimeout * 1000);
       
     } catch (error) {
       this.logger.error('获取列表时发生内部错误: %o', error);

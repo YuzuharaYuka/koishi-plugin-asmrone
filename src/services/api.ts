@@ -1,5 +1,3 @@
-// --- START OF FILE src/services/api.ts --- 
-
 import { Context } from 'koishi'
 import { ApiSearchResponse, WorkInfoResponse, TrackItem } from '../common/types'
 import { Config } from '../config'
@@ -17,6 +15,15 @@ export class AsmrApi {
   private cache = new Map<string, CacheEntry<any>>();
 
   constructor(private ctx: Context, private config: Config) {
+    if (this.config.apiBaseUrl && !this.config.apiBaseUrl.endsWith('/api')) {
+      if (this.config.apiBaseUrl.endsWith('/')) {
+        this.config.apiBaseUrl += 'api';
+      } else {
+        this.config.apiBaseUrl += '/api';
+      }
+      this.ctx.logger('asmrone').info(`自定义 API 地址已自动修正为: ${this.config.apiBaseUrl}`);
+    }
+    
     setInterval(() => this.cleanExpiredCache(), 5 * 60 * 1000);
   }
   
@@ -64,6 +71,7 @@ export class AsmrApi {
       }
     }
     
+    // [MODIFIED] 增强错误处理逻辑
     let finalError = new Error(`API 请求失败 (共 ${this.config.maxRetries} 次尝试)。`);
     if (this.ctx.http.isError(lastError)) {
       const status = lastError.response?.status;
@@ -76,7 +84,9 @@ export class AsmrApi {
           finalError = new Error(`API 请求时发生 HTTP 错误 (状态码: ${status})。`);
         }
       } else if (lastError.code === 'ETIMEDOUT' || lastError.code === 'ECONNABORTED') {
-        finalError = new Error('API 请求超时，请检查网络连接。');
+        finalError = new Error('API 请求超时，请检查网络连接或相关超时配置。');
+      } else if (lastError.code === 'ECONNREFUSED' || lastError.code === 'ENOTFOUND') {
+        finalError = new Error(`无法连接到 API 服务器，请检查 apiBaseUrl 配置 (${this.config.apiBaseUrl}) 或您的网络连接。`);
       }
     }
     this.ctx.logger('asmrone').error(finalError.message);

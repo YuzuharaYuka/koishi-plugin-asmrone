@@ -2,6 +2,8 @@ export declare const SendMode: {
     readonly CARD: "card";
     readonly FILE: "file";
     readonly ZIP: "zip";
+    readonly LINK: "link";
+    readonly VOICE: "voice";
 };
 export type SendMode = typeof SendMode[keyof typeof SendMode];
 export declare const AccessMode: {
@@ -20,3 +22,8 @@ export declare const CardModeNonAudioAction: {
     readonly FALLBACK: "fallbackToFile";
 };
 export type CardModeNonAudioAction = typeof CardModeNonAudioAction[keyof typeof CardModeNonAudioAction];
+export declare const VoiceModeNonAudioAction: {
+    readonly SKIP: "skip";
+    readonly FALLBACK: "fallbackToFile";
+};
+export type VoiceModeNonAudioAction = typeof VoiceModeNonAudioAction[keyof typeof VoiceModeNonAudioAction];

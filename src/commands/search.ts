@@ -1,5 +1,3 @@
-// --- START OF FILE src/commands/search.ts --- 
-
 import { Context } from 'koishi'
 import { CommandHandler, orderKeys } from './handler'
 
@@ -22,17 +20,15 @@ export function registerSearchCommand(ctx: Context, handler: CommandHandler) {
   price: 价格(日元) (price:1000, 表示>=1000)
   age: 年龄分级 (可选: general, r15, adult)
   lang: 语言 (可选: JPN, ENG, CHI_HANS 等)
-  order: 排序方式 (见下方)
-
 排除筛选: 在 key 前加 - (减号)，如 -tag:男性向け
 
-可用排序值 (用于 order:值):
+排序方式 (order:值)
+可用排序值:
 ${orderKeys.join(', ')}`
     )
     .example('搜音声 藤田茜')
     .example('搜音声 山田 tag:舔耳 order:发售日 2')
     .action(async ({ session }, ...query) => {
-      // Reconstruct the full query string from all arguments to pass to the handler
       return handler.handleSearch(session, query.join(' '));
     });
 }

@@ -1,5 +1,5 @@
 import { Schema } from 'koishi';
-import { AccessMode, SendMode, ZipMode, CardModeNonAudioAction } from './common/constants';
+import { AccessMode, SendMode, ZipMode, CardModeNonAudioAction, VoiceModeNonAudioAction } from './common/constants';
 export interface ImageMenuSettings {
     backgroundColor: string;
     itemBackgroundColor: string;
@@ -9,6 +9,10 @@ export interface ImageMenuSettings {
     highlightColor: string;
     enableAntiCensorship: boolean;
     imageRenderScale: number;
+}
+export interface CacheSettings {
+    enableCache: boolean;
+    cacheMaxAge: number;
 }
 export interface Config {
     useForward: boolean;
@@ -24,16 +28,19 @@ export interface Config {
     blacklist: string[];
     defaultSendMode: SendMode;
     cardModeNonAudioAction: CardModeNonAudioAction;
+    voiceModeNonAudioAction: VoiceModeNonAudioAction;
     downloadTimeout: number;
     downloadConcurrency: number;
     apiBaseUrl: string;
     usePassword: boolean;
-    password: string;
+    password?: string;
     zipMode: ZipMode;
     zipCompressionLevel: number;
     debug: boolean;
     prependRjCodeCard: boolean;
     prependRjCodeFile: boolean;
     prependRjCodeZip: boolean;
+    prependRjCodeLink: boolean;
+    cache: CacheSettings;
 }
 export declare const Config: Schema<Config>;

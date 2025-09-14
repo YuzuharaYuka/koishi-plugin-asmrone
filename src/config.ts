@@ -1,7 +1,5 @@
-// --- START OF FILE src/config.ts --- 
-
 import { Schema } from 'koishi'
-import { AccessMode, SendMode, ZipMode, CardModeNonAudioAction } from './common/constants'
+import { AccessMode, SendMode, ZipMode, CardModeNonAudioAction, VoiceModeNonAudioAction } from './common/constants'
 
 export interface ImageMenuSettings {
   backgroundColor: string;
@@ -12,6 +10,11 @@ export interface ImageMenuSettings {
   highlightColor: string;
   enableAntiCensorship: boolean;
   imageRenderScale: number;
+}
+
+export interface CacheSettings {
+  enableCache: boolean;
+  cacheMaxAge: number;
 }
 
 export interface Config {
@@ -28,17 +31,20 @@ export interface Config {
   blacklist: string[];
   defaultSendMode: SendMode;
   cardModeNonAudioAction: CardModeNonAudioAction;
+  voiceModeNonAudioAction: VoiceModeNonAudioAction; // [NEW]
   downloadTimeout: number;
   downloadConcurrency: number;
   apiBaseUrl: string;
   usePassword: boolean;
-  password: string;
+  password?: string;
   zipMode: ZipMode;
-  zipCompressionLevel: number; // New field
+  zipCompressionLevel: number;
   debug: boolean;
   prependRjCodeCard: boolean;
   prependRjCodeFile: boolean;
   prependRjCodeZip: boolean;
+  prependRjCodeLink: boolean;
+  cache: CacheSettings;
 }
 
 export const Config = Schema.intersect([
@@ -48,7 +54,7 @@ export const Config = Schema.intersect([
             Schema.const('https://api.asmr-100.com/api').description('asmr-100.com(国内墙)'),
             Schema.const('https://api.asmr-200.com/api').description('asmr-200.com(随缘墙)'),
             Schema.const('https://api.asmr-300.com/api').description('asmr-300.com(随缘墙)'),
-            Schema.string().description('自定义 API 地址'),
+            Schema.string().description('自定义 API 地址 (需以 /api 结尾)'),
         ]).default('https://api.asmr-200.com/api').description('音声数据 API 地址。'),
         useForward: Schema.boolean().default(false).description('(文本模式) 启用合并转发发送长消息。'),
         showSearchImage: Schema.boolean().default(false).description('(文本模式) 搜索结果中显示封面图 (有风控风险)。'),
@@ -86,18 +92,34 @@ export const Config = Schema.intersect([
             Schema.const(SendMode.CARD).description('音乐卡片 (card)'),
             Schema.const(SendMode.FILE).description('音频文件 (file)'),
             Schema.const(SendMode.ZIP).description('压缩包 (zip)'),
+            Schema.const(SendMode.LINK).description('下载链接 (link)'),
+            Schema.const(SendMode.VOICE).description('语音 (voice)'), // [NEW]
         ]).default(SendMode.FILE).description('默认音轨发送方式。'),
         cardModeNonAudioAction: Schema.union([
             Schema.const(CardModeNonAudioAction.SKIP).description('跳过 (默认)'),
             Schema.const(CardModeNonAudioAction.FALLBACK).description('转为 file 模式发送'),
         ]).default(CardModeNonAudioAction.SKIP).description('Card模式下对非音频文件的操作。'),
+        // [NEW] voice 模式的配置
+        voiceModeNonAudioAction: Schema.union([
+            Schema.const(VoiceModeNonAudioAction.SKIP).description('跳过 (默认)'),
+            Schema.const(VoiceModeNonAudioAction.FALLBACK).description('转为 file 模式发送'),
+        ]).default(VoiceModeNonAudioAction.SKIP).description('Voice模式下对非音频文件的操作。'),
         downloadTimeout: Schema.number().default(300).description('单文件下载超时 (秒)。'),
         downloadConcurrency: Schema.number().min(1).max(10).default(3).description('同时下载文件的最大数量。'),
     }).description('下载与发送设置'),
+
+    Schema.object({
+        cache: Schema.object({
+            enableCache: Schema.boolean().default(true).description('启用音频文件缓存以提高重复请求的速度。'),
+            cacheMaxAge: Schema.number().min(0).default(24).description('缓存文件最长保留时间 (小时)。设置为 0 表示永久保留 (直到插件停用)。'),
+        }).description('缓存设置')
+    }),
+
     Schema.object({
         prependRjCodeCard: Schema.boolean().default(false).description('Card 标题添加 RJ 号。'),
         prependRjCodeFile: Schema.boolean().default(true).description('File 文件名添加 RJ 号。'),
         prependRjCodeZip: Schema.boolean().default(true).description('Zip 包名/文件夹添加 RJ 号。'),
+        prependRjCodeLink: Schema.boolean().default(true).description('Link 模式标题添加 RJ 号。'),
     }).description('命名规则设置'),
     Schema.object({
         zipMode: Schema.union([
@@ -107,6 +129,7 @@ export const Config = Schema.intersect([
         zipCompressionLevel: Schema.number().min(0).max(9).default(1).description('ZIP 压缩级别 (0不压缩, 1最快, 9最高)。级别越高，文件越小但速度越慢。'),
         usePassword: Schema.boolean().default(false).description('Zip 是否加密。'),
     }).description('压缩包设置'),
+
     Schema.union([
         Schema.object({
             usePassword: Schema.const(true).required(),
@@ -114,6 +137,7 @@ export const Config = Schema.intersect([
         }),
         Schema.object({}),
     ]),
+
     Schema.object({
         debug: Schema.boolean().default(false).description('开启Debug模式 (输出详细API日志)。'),
     }).description('调试设置'),

@@ -9,20 +9,17 @@ declare module 'koishi' {
   }
 }
 
-// [MODIFIED] 补充了 id 字段，使其更完整
 export interface Tag { 
   id: number;
   name: string;
-  i18n?: any; // i18n 结构复杂，暂时定义为 any
+  i18n?: any;
 }
 
-// [MODIFIED] 补充了 id 字段，使其更完整
 export interface Va { 
   id: string;
   name:string;
 }
 
-// [MODIFIED] 补充了 price 和 review_count 字段
 export interface BaseWork {
   id: number;
   title: string;
@@ -40,7 +37,6 @@ export interface BaseWork {
   source_url: string;
 }
 
-// [MODIFIED] 补全了 pagination 的字段
 export interface ApiSearchResponse {
   works: BaseWork[];
   pagination: {
