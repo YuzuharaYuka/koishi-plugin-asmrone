@@ -1,3 +1,5 @@
+// --- START OF FILE src/services/sender.ts ---
+
 import { Context, Session, h, Logger } from 'koishi'
 import { resolve } from 'path'
 import { promises as fs, createWriteStream } from 'fs'
@@ -5,7 +7,8 @@ import { pathToFileURL } from 'url'
 import archiver from 'archiver'
 import { ProcessedFile, ValidFile, WorkInfoResponse } from '../common/types'
 import { Config } from '../config'
-import { SendMode, ZipMode, CardModeNonAudioAction, VoiceModeNonAudioAction } from '../common/constants'
+// [MODIFIED] 导入所有需要的常量
+import { SendMode, ZipMode, CardModeNonAudioAction, VoiceModeNonAudioAction, USER_AGENT, RETRY_DELAY_MS, MIN_FILE_SIZE_BYTES, LINK_SEND_DELAY_MS, ONEBOT_MUSIC_CARD_TYPE } from '../common/constants'
 import { getSafeFilename, getZipFilename } from '../common/utils'
 
 interface SendResultTracker {
@@ -16,8 +19,9 @@ interface SendResultTracker {
 
 export class TrackSender {
   private logger: Logger
+  // [MODIFIED] 使用常量
   private requestOptions = {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0' },
+    headers: { 'User-Agent': USER_AGENT },
   }
 
   constructor(private ctx: Context, private config: Config, private tempDir: string) {
@@ -42,7 +46,7 @@ export class TrackSender {
       try {
         const stats = await fs.stat(cachePath);
         const maxAgeMs = this.config.cache.cacheMaxAge * 3600 * 1000;
-        if (stats.size > 100 && (maxAgeMs === 0 || (Date.now() - stats.mtimeMs < maxAgeMs))) {
+        if (stats.size > MIN_FILE_SIZE_BYTES && (maxAgeMs === 0 || (Date.now() - stats.mtimeMs < maxAgeMs))) {
           this.logger.info(`[Cache] HIT for file path: ${file.title}`);
           return cachePath;
         }
@@ -69,7 +73,8 @@ export class TrackSender {
                 timeout: this.config.downloadTimeout * 1000 
             });
 
-            if (!arrayBuffer || arrayBuffer.byteLength < 100) throw new Error('文件为空或过小');
+            // [MODIFIED] 使用常量
+            if (!arrayBuffer || arrayBuffer.byteLength < MIN_FILE_SIZE_BYTES) throw new Error('文件为空或过小');
 
             await fs.writeFile(outputPath, Buffer.from(arrayBuffer));
             
@@ -79,7 +84,8 @@ export class TrackSender {
             this.logger.warn(`下载文件 "%s" 失败 (尝试 %d/%d): %s`, title, i + 1, this.config.maxRetries, error.message);
             await fs.unlink(outputPath).catch(() => {}); 
             if (i < this.config.maxRetries - 1) {
-                await new Promise(res => setTimeout(res, 1500));
+                // [MODIFIED] 使用常量
+                await new Promise(res => setTimeout(res, RETRY_DELAY_MS));
             }
         }
     }
@@ -232,7 +238,8 @@ export class TrackSender {
             const title = this.config.prependRjCodeLink ? `${rjCode} ${file.title}` : file.title;
             await session.send(`${index}. ${h.escape(title)}\n${file.url}`);
             results.success++;
-            await new Promise(res => setTimeout(res, 300));
+            // [MODIFIED] 使用常量
+            await new Promise(res => setTimeout(res, LINK_SEND_DELAY_MS));
         } catch (error) {
             this.logger.error('逐条发送链接 %s 失败: %o', index, error);
             results.failed++;
@@ -257,7 +264,8 @@ export class TrackSender {
             const musicPayload = [{
                 type: 'music',
                 data: {
-                    type: '163',
+                    // [MODIFIED] 使用常量
+                    type: ONEBOT_MUSIC_CARD_TYPE,
                     url: `https://asmr.one/work/${rjCode}`,
                     audio: file.url,
                     title: this.config.prependRjCodeCard ? `${rjCode} ${file.title}` : file.title,
@@ -330,7 +338,6 @@ export class TrackSender {
     await session.send(`正在准备压缩包 (${validFiles.length}个文件)...`);
     let tempZipPath: string;
     try {
-        // [FIXED] 确保根临时目录存在，防止热重载后目录被删除导致崩溃
         await this._ensureTempDir();
         const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
         const zipFileTitle = this.config.prependRjCodeZip ? `${rjCode} ${workInfo.title}` : workInfo.title;
@@ -380,7 +387,6 @@ export class TrackSender {
 
   private async handleMultipleZips(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     await session.send(`准备单独压缩 ${validFiles.length} 个文件...`);
-    // [FIXED] 同样确保根临时目录存在
     await this._ensureTempDir();
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
 

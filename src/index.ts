@@ -149,9 +149,6 @@ export function apply(ctx: Context, config: Config) {
     } catch (error) {
       logger.error('创建临时目录失败: %o', error);
     }
-    if (config.useImageMenu && !ctx.puppeteer) {
-      logger.warn('图片菜单功能已开启，但未找到 puppeteer 服务。请安装 koishi-plugin-puppeteer 并重启。');
-    }
     if (config.cache.enableCache) {
       cleanupAudioCache(logger, tempDir, config.cache.cacheMaxAge);
       ctx.setInterval(() => cleanupAudioCache(logger, tempDir, config.cache.cacheMaxAge), Time.hour);

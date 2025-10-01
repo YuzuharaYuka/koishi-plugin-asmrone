@@ -25,13 +25,6 @@
     "plugin",
     "API"
   ],
-  "koishi": {
-    "service": {
-      "optional": [
-        "puppeteer"
-      ]
-    }
-  },
   "peerDependencies": {
     "koishi": "^4.18.0"
   },

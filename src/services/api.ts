@@ -1,6 +1,9 @@
+// --- START OF FILE src/services/api.ts ---
+
 import { Context } from 'koishi'
 import { ApiSearchResponse, WorkInfoResponse, TrackItem } from '../common/types'
 import { Config } from '../config'
+import { USER_AGENT, RETRY_DELAY_MS } from '../common/constants' // [MODIFIED] 导入常量
 
 interface CacheEntry<T> {
   data: T;
@@ -8,8 +11,9 @@ interface CacheEntry<T> {
 }
 
 export class AsmrApi {
+  // [MODIFIED] 使用常量
   private requestOptions = {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0' },
+    headers: { 'User-Agent': USER_AGENT },
   }
   
   private cache = new Map<string, CacheEntry<any>>();
@@ -66,12 +70,12 @@ export class AsmrApi {
         lastError = error;
         this.ctx.logger('asmrone').warn(`API request to ${url} failed on attempt ${i + 1}/${this.config.maxRetries}. Retrying...`);
         if (i < this.config.maxRetries - 1) {
-            await new Promise(res => setTimeout(res, 1500));
+            // [MODIFIED] 使用常量
+            await new Promise(res => setTimeout(res, RETRY_DELAY_MS));
         }
       }
     }
     
-    // [MODIFIED] 增强错误处理逻辑
     let finalError = new Error(`API 请求失败 (共 ${this.config.maxRetries} 次尝试)。`);
     if (this.ctx.http.isError(lastError)) {
       const status = lastError.response?.status;

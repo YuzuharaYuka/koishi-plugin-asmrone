@@ -1,9 +1,11 @@
+// --- START OF FILE src/common/constants.ts ---
+
 export const SendMode = {
   CARD: 'card',
   FILE: 'file',
   ZIP: 'zip',
   LINK: 'link',
-  VOICE: 'voice', // [NEW] 新增 voice 模式
+  VOICE: 'voice',
 } as const;
 
 export type SendMode = typeof SendMode[keyof typeof SendMode];
@@ -30,10 +32,16 @@ export const CardModeNonAudioAction = {
 
 export type CardModeNonAudioAction = typeof CardModeNonAudioAction[keyof typeof CardModeNonAudioAction];
 
-// [NEW] 为 voice 模式新增非音频文件处理方式
 export const VoiceModeNonAudioAction = {
   SKIP: 'skip',
   FALLBACK: 'fallbackToFile',
 } as const;
 
 export type VoiceModeNonAudioAction = typeof VoiceModeNonAudioAction[keyof typeof VoiceModeNonAudioAction];
+
+// [MODIFIED] 更新为更新、更简洁的 User-Agent
+export const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+export const RETRY_DELAY_MS = 1500;
+export const MIN_FILE_SIZE_BYTES = 100;
+export const LINK_SEND_DELAY_MS = 300;
+export const ONEBOT_MUSIC_CARD_TYPE = '163';
