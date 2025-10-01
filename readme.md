@@ -1,6 +1,6 @@
 # koishi-plugin-asmrone
 
-[![npm](https://img.shields.io/npm/v/koishi-plugin-asmrone?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-asmrone)
+[![npm](https://img-shields.io/npm/v/koishi-plugin-asmrone?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-asmrone)
 
 利用 [asmr.one](https://asmr.one) 的 API，提供在聊天平台中搜索、查看并收听音声作品的功能。
 
@@ -10,18 +10,18 @@
 
 - **强大的搜索**: 支持关键词、标签、声优、社团等多种筛选条件，并可按发售日、评分、销量等多种方式排序。
 - **结果展示**: 支持两种模式展示搜索结果和作品详情：
-    - **图片菜单**: (需 `puppeteer`) 将内容渲染为图片发送，美观且能规避平台风控。
-    - **文本消息**: 以纯文本或合并转发的形式发送。
+  - **图片菜单**: (需 `puppeteer`) 将内容渲染为图片发送，美观且能规避平台风控。
+  - **文本消息**: 以纯文本或合并转发的形式发送。
 - **音轨获取**: 支持多种方式发送音轨：
-    - **`card`**: 音乐卡片 (仅部分平台支持，如 OneBot)。
-    - **`file`**: 逐个发送原始音频文件。
-    - **`zip`**: 将多个音轨打包为 ZIP 压缩包发送，支持加密和自定义压缩级别。
-    - **`link`**: 发送音轨的直接下载链接，在支持的平台会以合并转发形式发送。
-    - **`voice`**: 以语音形式发送 (仅部分平台支持，需配置 FFmpeg，且有性能开销)。
+  - **`card`**: 音乐卡片 (仅部分平台支持，如 OneBot)。
+  - **`file`**: 逐个发送原始音频文件。
+  - **`zip`**: 将多个音轨打包为 ZIP 压缩包发送，支持加密和自定义压缩级别。
+  - **`link`**: 发送音轨的直接下载链接，在支持的平台会以合并转发形式发送。
+  - **`voice`**: 以语音形式发送 (仅部分平台支持，需配置 FFmpeg，且有性能开销)。
 - **交互式操作**:
-    - 列表指令后可回复【序号】选择，【F】下一页，【P】上一页。
-    - 详情页可回复【B】返回列表。
-    - 所有交互均可回复【N/取消】随时中断。
+  - 列表指令后可回复序号选择，[F]下一页，[P]上一页。
+  - 详情页可回复[B]返回列表。
+  - 所有交互均可回复[N/取消]随时中断。
 - **权限管理**: 支持白名单和黑名单模式，可精细控制插件可用性。
 
 ## 安装
@@ -42,22 +42,23 @@
 
 通过在查询语句中添加 `key:value` 格式的参数来进行高级筛选和排序。
 
-| 筛选器 | 说明 | 示例 |
-| :--- | :--- | :--- |
-| `tag` | 标签 | `tag:舔耳` |
-| `va` | 声优 | `va:藤田茜` |
-| `circle` | 社团 | `circle:C-Lab.` |
-| `rate` | 评分 (大于等于) | `rate:4.5` |
-| `sell` | 销量 (大于等于) | `sell:1000` |
-| `price` | 价格 (日元, 大于等于) | `price:1000` |
-| `age` | 年龄分级 | `age:general` `age:r15` `age:adult` |
-| `lang` | 语言 | `lang:JPN` `lang:CHI_HANS` |
-| `order` | **排序方式** | `order:评分` |
-| `-key` | **排除条件** | `-tag:男性向け` |
+| 筛选器   | 说明                  | 示例                |
+| :------- | :-------------------- | :------------------ |
+| `tag`    | 标签                  | `tag:舔耳`          |
+| `va`     | 声优                  | `va:藤田茜`         |
+| `circle` | 社团                  | `circle:C-Lab.`     |
+| `rate`   | 评分 (大于等于)       | `rate:4.5`          |
+| `sell`   | 销量 (大于等于)       | `sell:1000`         |
+| `price`  | 价格 (日元, 大于等于) | `price:1000`        |
+| `age`    | 年龄分级              | `age:general` `age:r15` `age:adult` |
+| `lang`   | 语言                  | `lang:JPN` `lang:CHI_HANS` |
+| `order`  | **排序方式**          | `order:评分`        |
+| `-key`   | **排除条件**          | `-tag:男性向け`     |
 
 ---
 
 #### 可用排序值 (用于 `order:值`，默认按销量排序)
+
 `发售日`, `最新收录`, `发售日-正序`, `销量`, `价格-正序`, `价格`, `评分`, `评价数`, `RJ号`, `RJ号-正序`, `随机`
 
 ---
@@ -77,79 +78,83 @@
 
 - **`RJ号`**: 必需。支持 `RJ00123456` 或 `123456` 等格式，支持自动补全。
 - **`音轨序号` (可选)**: 一个或多个数字序号或范围，用空格分隔 (如 `1 3 5-8`)。
-    - 若提供，则直接获取指定音轨。
-    - 若省略，则返回作品详情并等待交互选择。
+  - 若提供，则直接获取指定音轨。
+  - 若省略，则返回作品详情并等待交互选择。
 - **`发送方式` (可选)**: `card` | `file` | `zip` | `link` | `voice`。
-    - 指定本次发送的格式，若省略则使用配置中的默认方式。
+  - 指定本次发送的格式，若省略则使用配置中的默认方式。
 
 #### **使用示例**
 
-1.  **获取详情并等待交互**:
-    ```
-    听音声 RJ00123456
-    ```
-    > 机器人将回复作品详情，等待输入音轨序号。
+1. **获取详情并等待交互**:
 
-2.  **直接获取指定音轨 (含范围，指定zip模式)**:
-    ```
-    听音声 RJ00123456 1 3 5-8 zip
-    ```
+   ```bash
+   听音声 RJ00123456
+   ```
 
-3.  **在交互中指定发送方式**:
-    > 使用 `听音声 RJ00123456` 后，可通过回复 `2 4-6 card` 来获取第 2、4、5、6 轨，并以音乐卡片形式发送。
+   > 机器人将回复作品详情，等待输入音轨序号。
+
+2. **直接获取指定音轨 (含范围，指定zip模式)**:
+
+   ```bash
+   听音声 RJ00123456 1 3 5-8 zip
+   ```
+
+3. **在交互中指定发送方式**:
+
+   > 使用 `听音声 RJ00123456` 后，可通过回复 `2 4-6 card` 来获取第 2、4、5、6 轨，并以音乐卡片形式发送。
 
 ## 配置项
 
 ### 基础设置
 
-| 配置项 | 类型 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `apiBaseUrl` | `string` | `https://api.asmr-200.com/api` | 音声数据 API 地址。 |
-| `useForward` | `boolean` | `false` | (文本模式) 启用合并转发发送长消息。 |
-| `showSearchImage` | `boolean` | `false` | (文本模式) 搜索结果中显示封面图 (有风控风险)。 |
-| `useImageMenu` | `boolean` | `true` | 启用图片菜单 (需 `puppeteer`)。 |
-| `showLinks` | `boolean` | `false` | 在详情中显示 asmr.one/DLsite 链接。 |
-| `pageSize` | `number` | `10` | 每页结果数量 (1-40)。 |
-| `interactionTimeout` | `number` | `60` | 交互操作超时时间 (秒)。 |
-| `maxRetries` | `number` | `3` | API请求及文件下载失败时的最大重试次数。 |
+| 配置项             | 类型      | 默认值                          | 说明                                           |
+| :------------------- | :-------- | :------------------------------ | :--------------------------------------------- |
+| `apiBaseUrl`         | `string`  | `https://api.asmr-200.com/api`  | 音声数据 API 地址。                            |
+| `useForward`         | `boolean` | `false`                         | (文本模式) 启用合并转发发送长消息。            |
+| `showSearchImage`    | `boolean` | `false`                         | (文本模式) 搜索结果中显示封面图 (有风控风险)。 |
+| `useImageMenu`       | `boolean` | `true`                          | 启用图片菜单 (需 `puppeteer`)。                |
+| `showLinks`          | `boolean` | `false`                         | 在详情中显示 asmr.one/DLsite 链接。            |
+| `pageSize`           | `number`  | `10`                            | 每页结果数量 (1-40)。                          |
+| `interactionTimeout` | `number`  | `60`                            | 交互操作超时时间 (秒)。                        |
+| `maxRetries`         | `number`  | `3`                             | API请求及文件下载失败时的最大重试次数。        |
 
 ### 权限设置
 
-| 配置项 | 类型 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `accessMode` | `string` | `all` | 访问权限模式: `all` (所有), `whitelist` (白名单), `blacklist` (黑名单)。 |
-| `whitelist` | `string[]` | `[]` | 白名单列表 (群号/频道 ID)，仅白名单模式生效。 |
-| `blacklist` | `string[]` | `[]` | 黑名单列表 (群号/频道 ID)，仅黑名单模式生效。 |
+| 配置项      | 类型       | 默认值  | 说明                                                         |
+| :---------- | :--------- | :------ | :----------------------------------------------------------- |
+| `accessMode`| `string`   | `all`   | 访问权限模式: `all` (所有), `whitelist` (白名单), `blacklist` (黑名单)。 |
+| `whitelist` | `string[]` | `[]`    | 白名单列表 (群号/频道 ID)，仅白名单模式生效。                 |
+| `blacklist` | `string[]` | `[]`    | 黑名单列表 (群号/频道 ID)，仅黑名单模式生效。                 |
 
 ### 下载与发送设置
 
-| 配置项 | 类型 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `defaultSendMode` | `string` | `file` | 默认音轨发送方式: `card`, `file`, `zip`, `link`, `voice`。 |
-| `cardModeNonAudioAction` | `string` | `skip` | Card模式下对非音频文件的操作: `skip` (跳过) 或 `fallbackToFile` (转为file模式发送)。 |
-| `voiceModeNonAudioAction` | `string` | `skip` | Voice模式下对非音频文件的操作: `skip` (跳过) 或 `fallbackToFile` (转为file模式发送)。 |
-| `downloadTimeout` | `number` | `300` | 单文件下载超时 (秒)。 |
-| `downloadConcurrency` | `number` | `3` | 同时下载文件的最大数量。 |
+| 配置项                    | 类型     | 默认值   | 说明                                                         |
+| :------------------------ | :------- | :------- | :----------------------------------------------------------- |
+| `defaultSendMode`         | `string` | `file`   | 默认音轨发送方式: `card`, `file`, `zip`, `link`, `voice`。     |
+| `cardModeNonAudioAction`  | `string` | `skip`   | Card模式下对非音频文件的操作: `skip` (跳过) 或 `fallbackToFile` (转为file模式发送)。 |
+| `voiceModeNonAudioAction` | `string` | `skip`   | Voice模式下对非音频文件的操作: `skip` (跳过) 或 `fallbackToFile` (转为file模式发送)。 |
+| `downloadTimeout`         | `number` | `300`    | 单文件下载超时 (秒)。                                        |
+| `downloadConcurrency`     | `number` | `3`      | 同时下载文件的最大数量。                                     |
 
 ### 命名规则设置
 
-| 配置项 | 类型 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `prependRjCodeCard` | `boolean` | `false` | Card 标题添加 RJ 号。 |
-| `prependRjCodeFile` | `boolean` | `true` | File 文件名添加 RJ 号。 |
-| `prependRjCodeZip` | `boolean` | `true` | Zip 包名/文件夹添加 RJ 号。 |
+| 配置项             | 类型      | 默认值  | 说明                        |
+| :----------------- | :-------- | :------ | :-------------------------- |
+| `prependRjCodeCard`| `boolean` | `false` | Card 标题添加 RJ 号。       |
+| `prependRjCodeFile`| `boolean` | `true`  | File 文件名添加 RJ 号。     |
+| `prependRjCodeZip` | `boolean` | `true`  | Zip 包名/文件夹添加 RJ 号。 |
 
 ### 压缩包设置
 
-| 配置项 | 类型 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `zipMode` | `string` | `single` | 多文件压缩方式: `single` (合并为一包) 或 `multiple` (每轨一包)。 |
-| `zipCompressionLevel` | `number` | `1` | ZIP 压缩级别 (0不压缩, 1最快, 9最高)。 |
-| `usePassword` | `boolean` | `false` | Zip 是否加密。 |
-| `password` | `string` | `""` | 压缩包密码 (需先启用 `usePassword`)。 |
+| 配置项                | 类型     | 默认值   | 说明                                               |
+| :-------------------- | :------- | :------- | :------------------------------------------------- |
+| `zipMode`             | `string` | `single` | 多文件压缩方式: `single` (合并为一包) 或 `multiple` (每轨一包)。 |
+| `zipCompressionLevel` | `number` | `1`      | ZIP 压缩级别 (0不压缩, 1最快, 9最高)。             |
+| `usePassword`         | `boolean`| `false`  | Zip 是否加密。                                     |
+| `password`            | `string` | `""`     | 压缩包密码 (需先启用 `usePassword`)。              |
 
 ### 调试设置
 
-| 配置项 | 类型 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- |
+| 配置项  | 类型      | 默认值  | 说明                                   |
+| :------ | :-------- | :------ | :------------------------------------- |
 | `debug` | `boolean` | `false` | 开启Debug模式 (在控制台输出详细API日志)。 |
