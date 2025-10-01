@@ -1,10 +1,13 @@
+// --- START OF FILE src/commands/handler.ts ---
+
 import { Context, Session, h, Logger, Element } from 'koishi'
-import { createHash } from 'crypto' // [NEW]
+import { createHash } from 'crypto'
 import { ApiSearchResponse, BaseWork, DisplayItem, AdvancedSearchParams } from '../common/types'
 import { Config } from '../config'
 import { AsmrApi } from '../services/api'
 import { Renderer } from '../services/renderer'
 import { TrackSender } from '../services/sender'
+import { InteractionManager } from '../services/interaction' // [NEW] 导入交互管理器
 import { formatRjCode, formatWorkDuration, processFileTree, parseTrackIndices } from '../common/utils'
 import { AccessMode, SendMode } from '../common/constants'
 
@@ -213,62 +216,49 @@ export class CommandHandler {
       }
       
       let promptMessage = `请在 ${this.config.interactionTimeout} 秒内回复【序号】进行收听 (如 1 3-5 [模式]，模式可选 card, file, zip, link, voice)，`;
-      if (onBack) {
-        promptMessage += `【B】返回列表，`;
-      }
+      if (onBack) promptMessage += `【B】返回列表，`;
       promptMessage += `或【N】取消。`;
       await session.send(promptMessage);
 
-      const dispose = this.ctx.middleware(async (midSession, next) => {
-        if (midSession.userId !== session.userId || midSession.channelId !== session.channelId) return next();
-        
-        clearTimeout(timer);
-        dispose();
+      // [REFACTORED] 使用 InteractionManager 替换旧的中间件逻辑
+      const interaction = new InteractionManager(this.ctx, this.config, session);
+      const userResponse = await interaction.waitForMessage();
 
-        try {
-          const choice = midSession.content.trim().toLowerCase();
-          if (choice === 'n' || choice === '取消') {
-            await midSession.send('操作已取消。');
-            return;
-          }
-
-          if ((choice === 'b' || choice === '返回') && onBack) {
-            await midSession.send('正在返回列表...');
-            await onBack();
-            return;
-          }
-          
-          const replyArgs = choice.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
-          let mode: SendMode = null;
-          if ([SendMode.CARD, SendMode.FILE, SendMode.ZIP, SendMode.LINK, SendMode.VOICE].includes(replyArgs[replyArgs.length - 1] as any)) {
-            mode = replyArgs.pop() as SendMode;
-          }
-          
-          const uniqueIndices = parseTrackIndices(replyArgs);
-          
-          if (uniqueIndices.length === 0) {
-            await midSession.send('输入无效，操作已取消。');
-          } else {
-            await this.sender.processAndSendTracks(uniqueIndices, processedFiles, workInfo, midSession, mode || this.config.defaultSendMode);
-          }
-
-        } catch (error) {
-            this.logger.error('处理用户交互时发生错误: %o', error);
-            await midSession.send(`交互处理失败：${error.message}`);
-        } finally {
-            this.activeInteractions.delete(interactionKey);
-        }
-      }, true);
-
-      const timer = setTimeout(() => {
-        dispose();
-        this.activeInteractions.delete(interactionKey);
+      if (!userResponse) {
         session.send('操作超时，已自动取消。');
-      }, this.config.interactionTimeout * 1000);
+        return;
+      }
+
+      const choice = userResponse.trim().toLowerCase();
+      if (choice === 'n' || choice === '取消') {
+        await session.send('操作已取消。');
+        return;
+      }
+
+      if ((choice === 'b' || choice === '返回') && onBack) {
+        await session.send('正在返回列表...');
+        await onBack();
+        return;
+      }
+      
+      const replyArgs = choice.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
+      let mode: SendMode = null;
+      if ([SendMode.CARD, SendMode.FILE, SendMode.ZIP, SendMode.LINK, SendMode.VOICE].includes(replyArgs[replyArgs.length - 1] as any)) {
+        mode = replyArgs.pop() as SendMode;
+      }
+      
+      const uniqueIndices = parseTrackIndices(replyArgs);
+      
+      if (uniqueIndices.length === 0) {
+        await session.send('输入无效，操作已取消。');
+      } else {
+        await this.sender.processAndSendTracks(uniqueIndices, processedFiles, workInfo, session, mode || this.config.defaultSendMode);
+      }
 
     } catch (error) {
         this.logger.error(`获取作品 ${rjCode} 失败: %o`, error);
         await session.send(`查询失败：${error.message}`);
+    } finally {
         this.activeInteractions.delete(interactionKey);
     }
   }
@@ -291,11 +281,9 @@ export class CommandHandler {
       }
       
       if (this.config.useImageMenu && this.ctx.puppeteer) {
-        // [NEW] 生成列表页的缓存键
         const keyString = JSON.stringify({ query: listTitle, page });
         const cacheKey = createHash('sha256').update(keyString).digest('hex');
 
-        // [MODIFIED] 使用新的缓存渲染方法
         const imageBuffer = await this.renderer.renderWithCache(cacheKey, async () => {
             const worksWithEmbeddedImages = await Promise.all(data.works.map(async (work) => {
                 const dataUri = await this.api.downloadImageAsDataUri(work.mainCoverUrl);
@@ -313,62 +301,50 @@ export class CommandHandler {
 
       await session.send(`请在 ${this.config.interactionTimeout} 秒内回复【序号】选择作品，【F】下一页，【P】上一页，或【N】取消。`);
       
-      const dispose = this.ctx.middleware(async (midSession, next) => {
-        if (midSession.userId !== session.userId || midSession.channelId !== session.channelId) return next();
-        
-        const content = midSession.content.trim().toLowerCase();
+      // [REFACTORED] 使用 InteractionManager 替换旧的中间件逻辑
+      const interaction = new InteractionManager(this.ctx, this.config, session);
+      const userResponse = await interaction.waitForMessage();
+      
+      if (!userResponse) {
+        session.send('操作超时，已自动取消。');
+        return;
+      }
+      
+      const content = userResponse.trim().toLowerCase();
+      
+      if (content === 'f') {
+        onNextPage(session, page + 1);
+      } else if (content === 'p') {
+        if (page <= 1) {
+          await session.send('已经是第一页了。');
+          return;
+        }
+        onNextPage(session, page - 1);
+      } else if (content === 'n' || content === '取消') {
+        await session.send('操作已取消。');
+      } else {
         const choice = parseInt(content, 10);
         const localIndex = choice - (page - 1) * this.config.pageSize;
-        const isChoiceValid = !isNaN(choice) && localIndex >= 1 && localIndex <= data.works.length;
-        
-        if (content !== 'f' && content !== 'p' && content !== 'n' && content !== '取消' && !isChoiceValid) {
-            return next();
+        if (!isNaN(choice) && localIndex >= 1 && localIndex <= data.works.length) {
+          const selectedWork = data.works[localIndex - 1];
+          const onBack = () => this.handleListInteraction(session, page, fetcher, listTitle, onNextPage);
+          await this.handleWorkSelection(session, `RJ${String(selectedWork.id).padStart(8, '0')}`, onBack);
+        } else {
+          // 如果用户发送了其他无关内容，可以选择回复或忽略
+          // await session.send('输入无效，操作已取消。');
         }
-
-        if (content === 'p' && page <= 1) {
-            await midSession.send('已经是第一页了。');
-            return;
-        }
-
-        clearTimeout(timer);
-        dispose();
-
-        try {
-            if (content === 'f') {
-                onNextPage(midSession, page + 1);
-            } else if (content === 'p') {
-                onNextPage(midSession, page - 1);
-            } else if (content === 'n' || content === '取消') {
-                await midSession.send('操作已取消。');
-                this.activeInteractions.delete(interactionKey);
-            } else if (isChoiceValid) {
-                const selectedWork = data.works[localIndex - 1];
-                const onBack = () => this.handleListInteraction(midSession, page, fetcher, listTitle, onNextPage);
-                await this.handleWorkSelection(midSession, `RJ${String(selectedWork.id).padStart(8, '0')}`, onBack);
-            }
-        } catch (error) {
-            this.logger.error('处理列表交互时发生错误: %o', error);
-            await midSession.send(`交互处理失败：${error.message}`);
-            this.activeInteractions.delete(interactionKey);
-        }
-      }, true);
-
-      const timer = setTimeout(() => {
-        dispose();
-        this.activeInteractions.delete(interactionKey);
-        session.send('操作超时，已自动取消。');
-      }, this.config.interactionTimeout * 1000);
+      }
       
     } catch (error) {
       this.logger.error('获取列表时发生内部错误: %o', error);
       await session.send(`列表获取失败：${error.message}`);
-      this.activeInteractions.delete(interactionKey);
+    } finally {
+        this.activeInteractions.delete(interactionKey);
     }
   }
 
   private async sendWorkInfo(session: Session, workInfo: BaseWork, displayItems: DisplayItem[], rjCode: string) {
     if (this.config.useImageMenu && this.ctx.puppeteer) {
-        // [MODIFIED] 使用新的缓存渲染方法，RJ 号直接作为缓存键
         const imageBuffer = await this.renderer.renderWithCache(rjCode, async () => {
             const coverDataUri = await this.api.downloadImageAsDataUri(workInfo.mainCoverUrl);
             const workInfoWithEmbeddedImage = { ...workInfo, mainCoverUrl: coverDataUri || workInfo.mainCoverUrl };
