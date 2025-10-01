@@ -8,7 +8,6 @@ import { Config } from '../config'
 import { SendMode, ZipMode, CardModeNonAudioAction, VoiceModeNonAudioAction } from '../common/constants'
 import { getSafeFilename, getZipFilename } from '../common/utils'
 
-// [NEW] 结果追踪器类型
 interface SendResultTracker {
   success: number;
   failed: number;
@@ -25,68 +24,72 @@ export class TrackSender {
     this.logger = ctx.logger('asmrone')
   }
 
-  private async _ensureTempDir(): Promise<void> {
+  private async _ensureTempDir(path: string = this.tempDir): Promise<void> {
     try {
-      await fs.mkdir(this.tempDir, { recursive: true });
+      await fs.mkdir(path, { recursive: true });
     } catch (error) {
-      this.logger.error('Failed to create temporary directory at %s: %o', this.tempDir, error);
-      throw new Error(`无法创建临时目录，请检查权限：${this.tempDir}`);
+      this.logger.error('Failed to create directory at %s: %o', path, error);
+      throw new Error(`无法创建目录，请检查权限：${path}`);
     }
   }
 
-  private async _getCachedFileOrDownload(file: ProcessedFile, rjCode: string): Promise<Buffer> {
-    if (!this.config.cache.enableCache) {
-      return this._downloadWithRetry(file.url, file.title);
-    }
-    
+  private async _getCachedFilePathOrDownload(file: ProcessedFile, rjCode: string): Promise<string> {
     const safeFilename = getSafeFilename(file.title);
     const cacheDir = resolve(this.tempDir, rjCode);
     const cachePath = resolve(cacheDir, safeFilename);
 
-    try {
-      const stats = await fs.stat(cachePath);
-      const maxAgeMs = this.config.cache.cacheMaxAge * 3600 * 1000;
-      if (stats.size > 100 && (maxAgeMs === 0 || (Date.now() - stats.mtimeMs < maxAgeMs))) {
-        this.logger.info(`[Cache] HIT for file: ${file.title}`);
-        return fs.readFile(cachePath);
-      }
-    } catch (error) {
-      if (error.code !== 'ENOENT') {
-        this.logger.warn(`[Cache] Error checking cache for ${file.title}: %o`, error);
-      }
-    }
-
-    this.logger.info(`[Cache] MISS for file: ${file.title}, downloading...`);
-    const buffer = await this._downloadWithRetry(file.url, file.title);
-    
-    fs.mkdir(cacheDir, { recursive: true })
-      .then(() => fs.writeFile(cachePath, buffer))
-      .catch(err => this.logger.error(`[Cache] Failed to write cache for ${file.title}: %o`, err));
-
-    return buffer;
-  }
-
-  private async _downloadWithRetry(url: string, title: string): Promise<Buffer> {
-    let lastError: Error | null = null;
-    for (let i = 0; i < this.config.maxRetries; i++) {
+    if (this.config.cache.enableCache) {
       try {
-        const buffer = await this.ctx.http.get<ArrayBuffer>(url, { 
-          ...this.requestOptions, 
-          responseType: 'arraybuffer', 
-          timeout: this.config.downloadTimeout * 1000 
-        });
-        if (!buffer || buffer.byteLength < 100) throw new Error('文件为空或过小');
-        return Buffer.from(buffer);
+        const stats = await fs.stat(cachePath);
+        const maxAgeMs = this.config.cache.cacheMaxAge * 3600 * 1000;
+        if (stats.size > 100 && (maxAgeMs === 0 || (Date.now() - stats.mtimeMs < maxAgeMs))) {
+          this.logger.info(`[Cache] HIT for file path: ${file.title}`);
+          return cachePath;
+        }
       } catch (error) {
-        lastError = error;
-        this.logger.warn(`下载文件 "%s" 失败 (尝试 %d/%d): %s`, title, i + 1, this.config.maxRetries, error.message);
-        if (i < this.config.maxRetries - 1) {
-            await new Promise(res => setTimeout(res, 1500));
+        if (error.code !== 'ENOENT') {
+          this.logger.warn(`[Cache] Error checking cache for ${file.title}: %o`, error);
         }
       }
     }
+    
+    this.logger.info(`[Cache] MISS for file path: ${file.title}, downloading...`);
+    await this._ensureTempDir(cacheDir);
+    await this._downloadFileWithRetry(file.url, file.title, cachePath);
+    return cachePath;
+  }
+  
+  private async _downloadFileWithRetry(url: string, title: string, outputPath: string): Promise<void> {
+    let lastError: Error | null = null;
+    for (let i = 0; i < this.config.maxRetries; i++) {
+        try {
+            const arrayBuffer = await this.ctx.http.get<ArrayBuffer>(url, { 
+                ...this.requestOptions, 
+                responseType: 'arraybuffer',
+                timeout: this.config.downloadTimeout * 1000 
+            });
+
+            if (!arrayBuffer || arrayBuffer.byteLength < 100) throw new Error('文件为空或过小');
+
+            await fs.writeFile(outputPath, Buffer.from(arrayBuffer));
+            
+            return;
+        } catch (error) {
+            lastError = error;
+            this.logger.warn(`下载文件 "%s" 失败 (尝试 %d/%d): %s`, title, i + 1, this.config.maxRetries, error.message);
+            await fs.unlink(outputPath).catch(() => {}); 
+            if (i < this.config.maxRetries - 1) {
+                await new Promise(res => setTimeout(res, 1500));
+            }
+        }
+    }
     this.logger.error(`下载文件 "%s" 在 %d 次尝试后彻底失败。`, title, this.config.maxRetries);
     throw lastError;
+  }
+  
+  private async _getCachedFileOrDownload(file: ProcessedFile, rjCode: string): Promise<Buffer> {
+      const filePath = await this._getCachedFilePathOrDownload(file, rjCode);
+      return fs.readFile(filePath);
   }
 
   private async downloadFilesWithConcurrency<T, R>(
@@ -122,7 +125,6 @@ export class TrackSender {
         return;
     }
 
-    // [NEW] 初始化结果追踪器
     const results: SendResultTracker = { success: 0, failed: 0, reasons: new Set() };
     const nonAudioFilesToFallback: ValidFile[] = [];
 
@@ -154,16 +156,14 @@ export class TrackSender {
         await this._sendAsZip(validFiles, workInfo, session, results);
     } else if (mode === SendMode.LINK) {
         await this._sendAsLink(validFiles, workInfo, session, results);
-    } else { // 默认或 file 模式
+    } else {
         await this._sendAsFile(validFiles, workInfo, session, results);
     }
 
-    // [NEW] 处理回退发送的文件
     if (nonAudioFilesToFallback.length > 0) {
         await this._sendAsFile(nonAudioFilesToFallback, workInfo, session, results);
     }
     
-    // [NEW] 发送总结报告
     let summary = '请求处理完毕。';
     if (results.success > 0) summary += ` 成功 ${results.success} 个。`;
     if (results.failed > 0) {
@@ -212,7 +212,6 @@ export class TrackSender {
     
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
 
-    // 尝试合并转发
     if (session.platform === 'onebot' && typeof session.send === 'function') {
         try {
             const forwardMessages = validFiles.map(({ index, file }) => {
@@ -221,14 +220,13 @@ export class TrackSender {
                 return h('message', { userId: session.bot.selfId, nickname: session.bot.user?.name || session.bot.selfId }, content);
             });
             await session.send(h('figure', forwardMessages));
-            results.success += validFiles.length; // 假设合并转发整体成功
+            results.success += validFiles.length;
             return;
         } catch (error) {
             this.logger.warn('发送合并转发消息失败，将回退到逐条发送模式: %o', error);
         }
     }
     
-    // 逐条发送
     for (const { index, file } of validFiles) {
         try {
             const title = this.config.prependRjCodeLink ? `${rjCode} ${file.title}` : file.title;
@@ -332,35 +330,47 @@ export class TrackSender {
     await session.send(`正在准备压缩包 (${validFiles.length}个文件)...`);
     let tempZipPath: string;
     try {
+        // [FIXED] 确保根临时目录存在，防止热重载后目录被删除导致崩溃
+        await this._ensureTempDir();
         const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
-        const downloadWorker = ({ index, file }: ValidFile) =>
-            this._getCachedFileOrDownload(file, rjCode)
-                .then(buffer => ({
-                    path: this.config.prependRjCodeZip ? `${getSafeFilename(rjCode)}/${file.path}` : file.path,
-                    data: buffer
-                }))
-                .catch(error => {
-                    this.logger.error('ZIP下载文件 %s (%s) 失败: %o', index, file.title, error);
-                    session.send(`压缩包: 文件 ${index} (${getSafeFilename(file.title)}) 下载失败，已跳过。`);
-                    results.failed++;
-                    results.reasons.add('下载失败');
-                    return null;
-                });
+        const zipFileTitle = this.config.prependRjCodeZip ? `${rjCode} ${workInfo.title}` : workInfo.title;
+        const zipFilename = getZipFilename(zipFileTitle);
         
-        const downloadedFiles = (await this.downloadFilesWithConcurrency(validFiles, downloadWorker)).filter(f => f);
+        const { archive, finishPromise, tempPath } = this.createZipArchiveStream(zipFilename);
+        tempZipPath = tempPath;
+        let filesAdded = 0;
 
-        if (downloadedFiles.length > 0) {
-            const zipFileTitle = this.config.prependRjCodeZip ? `${rjCode} ${workInfo.title}` : workInfo.title;
-            const zipFilename = getZipFilename(zipFileTitle);
-            await session.send(`已下载 ${downloadedFiles.length} 个文件，正在压缩...`);
-            tempZipPath = await this.createZipArchive(downloadedFiles, zipFilename);
+        for (const { index, file } of validFiles) {
+            try {
+                const filePathOnDisk = await this._getCachedFilePathOrDownload(file, rjCode);
+                const pathInZip = this.config.prependRjCodeZip 
+                    ? `${getSafeFilename(rjCode)}/${file.path}` 
+                    : file.path;
+                archive.file(filePathOnDisk, { name: pathInZip });
+                filesAdded++;
+            } catch (error) {
+                this.logger.error('ZIP下载文件 %s (%s) 失败: %o', index, file.title, error);
+                session.send(`压缩包: 文件 ${index} (${getSafeFilename(file.title)}) 下载失败，已跳过。`);
+                results.failed++;
+                results.reasons.add('下载失败');
+            }
+        }
+
+        if (filesAdded > 0) {
+            await session.send(`已处理 ${filesAdded} 个文件，正在压缩...`);
+            await archive.finalize();
+            await finishPromise;
             await session.send(`压缩包创建完毕，发送中...`);
             await session.send(h('file', { src: pathToFileURL(tempZipPath).href, title: zipFilename }));
-            results.success++; // 整个 zip 包算一次成功
-        } else { await session.send('所有文件均下载失败，压缩取消。'); }
+            results.success++;
+        } else {
+            archive.abort();
+            await session.send('所有文件均下载失败，压缩取消。');
+        }
+
     } catch (error) {
         this.logger.error('创建或发送合并压缩包失败: %o', error);
-        results.failed++;
+        results.failed += validFiles.length - results.failed;
         results.reasons.add('压缩或发送失败');
         await session.send('压缩包发送失败。');
     } finally {
@@ -370,14 +380,24 @@ export class TrackSender {
 
   private async handleMultipleZips(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     await session.send(`准备单独压缩 ${validFiles.length} 个文件...`);
+    // [FIXED] 同样确保根临时目录存在
+    await this._ensureTempDir();
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
+
     for (const { index, file } of validFiles) {
         let tempZipPath: string;
         try {
-            const audioBuffer = await this._getCachedFileOrDownload(file, rjCode);
+            const filePathOnDisk = await this._getCachedFilePathOrDownload(file, rjCode);
             const baseFilename = this.config.prependRjCodeZip ? `${rjCode} ${file.title}` : file.title;
             const zipFilename = getZipFilename(baseFilename);
-            tempZipPath = await this.createZipArchive([{ path: getSafeFilename(file.title), data: audioBuffer }], zipFilename);
+            
+            const { archive, finishPromise, tempPath } = this.createZipArchiveStream(zipFilename);
+            tempZipPath = tempPath;
+
+            archive.file(filePathOnDisk, { name: getSafeFilename(file.title) });
+            await archive.finalize();
+            await finishPromise;
+
             await session.send(h('file', { src: pathToFileURL(tempZipPath).href, title: zipFilename }));
             results.success++;
         } catch (error) {
@@ -391,31 +411,30 @@ export class TrackSender {
     }
   }
 
-  private async createZipArchive(filesToPack: { path: string; data: Buffer }[], outputZipName: string): Promise<string> {
-    await this._ensureTempDir();
-    return new Promise((promiseResolve, promiseReject) => {
-      const tempZipPath = resolve(this.tempDir, outputZipName);
-      const output = createWriteStream(tempZipPath);
-      const isEncrypted = this.config.usePassword && this.config.password && this.config.password.length > 0;
-      const format = isEncrypted ? 'zip-encrypted' : 'zip';
+  private createZipArchiveStream(outputZipName: string): { archive: archiver.Archiver, finishPromise: Promise<void>, tempPath: string } {
+    const tempZipPath = resolve(this.tempDir, outputZipName);
+    const output = createWriteStream(tempZipPath);
+    const isEncrypted = this.config.usePassword && this.config.password && this.config.password.length > 0;
+    const format = isEncrypted ? 'zip-encrypted' : 'zip';
 
-      const archiveOptions: archiver.ArchiverOptions & { encryptionMethod?: string; password?: string } = {
-        zlib: { level: this.config.zipCompressionLevel }
-      };
+    const archiveOptions: archiver.ArchiverOptions & { encryptionMethod?: string; password?: string } = {
+      zlib: { level: this.config.zipCompressionLevel }
+    };
 
-      if (isEncrypted) {
-        archiveOptions.encryptionMethod = 'aes256';
-        archiveOptions.password = this.config.password;
-      }
+    if (isEncrypted) {
+      archiveOptions.encryptionMethod = 'aes256';
+      archiveOptions.password = this.config.password;
+    }
 
-      const archive = archiver(format as archiver.Format, archiveOptions);
+    const archive = archiver(format as archiver.Format, archiveOptions);
+    archive.pipe(output);
 
-      output.on("close", () => promiseResolve(tempZipPath));
-      archive.on("warning", (err) => this.logger.warn('Archiver warning: %o', err));
-      archive.on("error", (err) => promiseReject(err));
-      archive.pipe(output);
-      filesToPack.forEach(file => archive.append(file.data, { name: file.path }));
-      archive.finalize();
+    const finishPromise = new Promise<void>((resolve, reject) => {
+        output.on("close", resolve);
+        archive.on("warning", (err) => this.logger.warn('Archiver warning: %o', err));
+        archive.on("error", reject);
     });
+    
+    return { archive, finishPromise, tempPath: tempZipPath };
   }
 }
