@@ -1,4 +1,5 @@
 import { Context, Session, h, Logger, Element } from 'koishi'
+import { createHash } from 'crypto' // [NEW]
 import { ApiSearchResponse, BaseWork, DisplayItem, AdvancedSearchParams } from '../common/types'
 import { Config } from '../config'
 import { AsmrApi } from '../services/api'
@@ -20,7 +21,6 @@ const orderMap: Record<string, { order: string; sort: string }> = {
   'RJ号-正序': { order: 'id', sort: 'asc' },
   '随机': { order: 'random', sort: 'desc' },
 };
-// [FIXED] 导出 orderKeys，以便其他文件可以导入和使用
 export const orderKeys = Object.keys(orderMap);
 
 
@@ -291,14 +291,22 @@ export class CommandHandler {
       }
       
       if (this.config.useImageMenu && this.ctx.puppeteer) {
-        const worksWithEmbeddedImages = await Promise.all(data.works.map(async (work) => {
-            const dataUri = await this.api.downloadImageAsDataUri(work.mainCoverUrl);
-            return { ...work, mainCoverUrl: dataUri || work.mainCoverUrl };
-        }));
-        const html = this.renderer.createSearchHtml(worksWithEmbeddedImages, listTitle, page, data.pagination.totalCount);
-        const imageBuffer = await this.renderer.renderHtmlToImage(html);
+        // [NEW] 生成列表页的缓存键
+        const keyString = JSON.stringify({ query: listTitle, page });
+        const cacheKey = createHash('sha256').update(keyString).digest('hex');
+
+        // [MODIFIED] 使用新的缓存渲染方法
+        const imageBuffer = await this.renderer.renderWithCache(cacheKey, async () => {
+            const worksWithEmbeddedImages = await Promise.all(data.works.map(async (work) => {
+                const dataUri = await this.api.downloadImageAsDataUri(work.mainCoverUrl);
+                return { ...work, mainCoverUrl: dataUri || work.mainCoverUrl };
+            }));
+            return this.renderer.createSearchHtml(worksWithEmbeddedImages, listTitle, page, data.pagination.totalCount);
+        });
+
         if (imageBuffer) await session.send(h.image(imageBuffer, 'image/png'));
         else await this.sendSearchTextResult(session, data, page);
+
       } else {
         await this.sendSearchTextResult(session, data, page);
       }
@@ -360,14 +368,13 @@ export class CommandHandler {
 
   private async sendWorkInfo(session: Session, workInfo: BaseWork, displayItems: DisplayItem[], rjCode: string) {
     if (this.config.useImageMenu && this.ctx.puppeteer) {
-        const coverDataUri = await this.api.downloadImageAsDataUri(workInfo.mainCoverUrl);
-        const workInfoWithEmbeddedImage = {
-            ...workInfo,
-            mainCoverUrl: coverDataUri || workInfo.mainCoverUrl,
-        };
+        // [MODIFIED] 使用新的缓存渲染方法，RJ 号直接作为缓存键
+        const imageBuffer = await this.renderer.renderWithCache(rjCode, async () => {
+            const coverDataUri = await this.api.downloadImageAsDataUri(workInfo.mainCoverUrl);
+            const workInfoWithEmbeddedImage = { ...workInfo, mainCoverUrl: coverDataUri || workInfo.mainCoverUrl };
+            return this.renderer.createWorkInfoHtml(workInfoWithEmbeddedImage, displayItems, '');
+        });
 
-        const html = this.renderer.createWorkInfoHtml(workInfoWithEmbeddedImage, displayItems, '');
-        const imageBuffer = await this.renderer.renderHtmlToImage(html);
         if (imageBuffer) {
             await session.send(h.image(imageBuffer, 'image/png'));
             return;
@@ -423,7 +430,6 @@ export class CommandHandler {
         `   日期: 📅 ${work.release}`,
         `   声优: 🎤 ${h.escape(work.vas.map(v => v.name).join(', ') || '未知')}`,
         `   评分: ⭐️ ${work.rate_average_2dp} (${work.rate_count})`,
-        `   销量: 📥 ${work.dl_count}`,
         `   时长: ⏱️ ${formatWorkDuration(work.duration)}`,
         `   标签: 🏷️ ${h.escape(tags)}`,
       ].join('\n');

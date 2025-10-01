@@ -1,7 +1,7 @@
-// --- START OF FILE src/services/renderer.ts --- 
-
 import { Context, h, Logger } from 'koishi'
 import * as PImage from 'pureimage'
+import { promises as fs } from 'fs'
+import { resolve } from 'path'
 import { PassThrough } from 'stream'
 import { BaseWork, WorkInfoResponse, DisplayItem } from '../common/types'
 import { Config } from '../config'
@@ -9,12 +9,91 @@ import { formatWorkDuration } from '../common/utils'
 
 export class Renderer {
   private logger: Logger
+  private renderCacheDir: string
   
-  constructor(private ctx: Context, private config: Config) {
+  constructor(private ctx: Context, private config: Config, renderCacheDir: string) {
     this.logger = ctx.logger('asmrone')
+    this.renderCacheDir = renderCacheDir
   }
 
-  async renderHtmlToImage(html: string): Promise<Buffer | null> {
+  private async _applyAntiCensorship(imageBuffer: Buffer): Promise<Buffer> {
+    try {
+      const bufferStream = new PassThrough();
+      bufferStream.end(imageBuffer);
+      const img = await PImage.decodePNGFromStream(bufferStream);
+
+      const ctx = img.getContext('2d');
+      const randomX = Math.floor(Math.random() * img.width);
+      const randomY = Math.floor(Math.random() * img.height);
+      const randomAlpha = Math.random() * 0.1;
+      ctx.fillStyle = `rgba(0,0,0,${randomAlpha.toFixed(2)})`;
+      ctx.fillRect(randomX, randomY, 1, 1);
+
+      const passThrough = new PassThrough();
+      const chunks: Buffer[] = [];
+      passThrough.on('data', (chunk) => chunks.push(chunk));
+      
+      const finishPromise = new Promise<void>((resolve, reject) => {
+          passThrough.on('end', resolve);
+          passThrough.on('error', reject);
+      });
+
+      await PImage.encodePNGToStream(img, passThrough);
+      await finishPromise;
+      const processedImageBuffer = Buffer.concat(chunks);
+      this.logger.info(`[Anti-Censorship] Image processed. Added noise at (${randomX}, ${randomY}).`);
+      return processedImageBuffer;
+
+    } catch (error) {
+      this.logger.error('Error during image processing with pureimage: %o', error);
+      return imageBuffer;
+    }
+  }
+
+  public async renderWithCache(cacheKey: string, htmlGenerator: () => Promise<string>): Promise<Buffer | null> {
+    let cleanImageBuffer: Buffer | null = null;
+
+    if (this.config.renderCache.enableRenderCache) {
+      const cachePath = resolve(this.renderCacheDir, `${cacheKey}.png`);
+      const maxAgeMs = this.config.renderCache.renderCacheMaxAge * 3600 * 1000;
+      try {
+        const stats = await fs.stat(cachePath);
+        if (maxAgeMs === 0 || (Date.now() - stats.mtimeMs < maxAgeMs)) {
+          this.logger.info(`[Render Cache] HIT for key: ${cacheKey}`);
+          cleanImageBuffer = await fs.readFile(cachePath);
+        }
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          this.logger.warn(`[Render Cache] Error checking cache for ${cacheKey}: %o`, error);
+        }
+      }
+    }
+
+    if (!cleanImageBuffer) {
+      this.logger.info(`[Render Cache] MISS for key: ${cacheKey}, rendering...`);
+      const html = await htmlGenerator();
+      cleanImageBuffer = await this._renderHtmlViaPuppeteer(html);
+
+      if (cleanImageBuffer && this.config.renderCache.enableRenderCache) {
+        const cachePath = resolve(this.renderCacheDir, `${cacheKey}.png`);
+        
+        // [FIXED] 在写入文件前，确保目录存在，解决竞态条件问题
+        fs.mkdir(this.renderCacheDir, { recursive: true })
+          .then(() => fs.writeFile(cachePath, cleanImageBuffer))
+          .catch(err => this.logger.error(`[Render Cache] Failed to write cache for ${cacheKey}: %o`, err));
+      }
+    }
+    
+    if (!cleanImageBuffer) return null;
+
+    if (this.config.imageMenu?.enableAntiCensorship) {
+      return this._applyAntiCensorship(cleanImageBuffer);
+    }
+    
+    return cleanImageBuffer;
+  }
+
+  private async _renderHtmlViaPuppeteer(html: string): Promise<Buffer | null> {
     if (!this.ctx.puppeteer) return null;
     let page;
     try {
@@ -25,42 +104,7 @@ export class Renderer {
 
       await page.setContent(html, { waitUntil: 'networkidle0' });
       const imageBuffer = await page.screenshot({ fullPage: true, type: 'png' });
-
-      if (!this.config.imageMenu?.enableAntiCensorship) {
-        return imageBuffer;
-      }
-
-      try {
-        const bufferStream = new PassThrough();
-        bufferStream.end(imageBuffer);
-        const img = await PImage.decodePNGFromStream(bufferStream);
-
-        const ctx = img.getContext('2d');
-        const randomX = Math.floor(Math.random() * img.width);
-        const randomY = Math.floor(Math.random() * img.height);
-        const randomAlpha = Math.random() * 0.1;
-        ctx.fillStyle = `rgba(0,0,0,${randomAlpha.toFixed(2)})`;
-        ctx.fillRect(randomX, randomY, 1, 1);
-
-        const passThrough = new PassThrough();
-        const chunks: Buffer[] = [];
-        passThrough.on('data', (chunk) => chunks.push(chunk));
-        
-        const finishPromise = new Promise<void>((resolve, reject) => {
-            passThrough.on('end', resolve);
-            passThrough.on('error', reject);
-        });
-
-        await PImage.encodePNGToStream(img, passThrough);
-        await finishPromise;
-        const processedImageBuffer = Buffer.concat(chunks);
-        this.logger.info(`[Anti-Censorship] Image processed. Added noise at (${randomX}, ${randomY}).`);
-        return processedImageBuffer;
-
-      } catch (error) {
-        this.logger.error('Error during image processing with pureimage: %o', error);
-        return imageBuffer;
-      }
+      return imageBuffer;
 
     } catch (error) {
       this.logger.error('Puppeteer 渲染失败: %o', error);

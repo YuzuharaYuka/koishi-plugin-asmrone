@@ -17,6 +17,7 @@
     - **`file`**: 逐个发送原始音频文件。
     - **`zip`**: 将多个音轨打包为 ZIP 压缩包发送，支持加密和自定义压缩级别。
     - **`link`**: 发送音轨的直接下载链接，在支持的平台会以合并转发形式发送。
+    - **`voice`**: 以语音形式发送 (仅部分平台支持，需配置 FFmpeg，且有性能开销)。
 - **交互式操作**:
     - 列表指令后可回复【序号】选择，【F】下一页，【P】上一页。
     - 详情页可回复【B】返回列表。
@@ -78,7 +79,7 @@
 - **`音轨序号` (可选)**: 一个或多个数字序号或范围，用空格分隔 (如 `1 3 5-8`)。
     - 若提供，则直接获取指定音轨。
     - 若省略，则返回作品详情并等待交互选择。
-- **`发送方式` (可选)**: `card` | `file` | `zip` | `link`。
+- **`发送方式` (可选)**: `card` | `file` | `zip` | `link` | `voice`。
     - 指定本次发送的格式，若省略则使用配置中的默认方式。
 
 #### **使用示例**
@@ -124,8 +125,9 @@
 
 | 配置项 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `defaultSendMode` | `string` | `file` | 默认音轨发送方式: `card`, `file`, `zip`, `link`。 |
+| `defaultSendMode` | `string` | `file` | 默认音轨发送方式: `card`, `file`, `zip`, `link`, `voice`。 |
 | `cardModeNonAudioAction` | `string` | `skip` | Card模式下对非音频文件的操作: `skip` (跳过) 或 `fallbackToFile` (转为file模式发送)。 |
+| `voiceModeNonAudioAction` | `string` | `skip` | Voice模式下对非音频文件的操作: `skip` (跳过) 或 `fallbackToFile` (转为file模式发送)。 |
 | `downloadTimeout` | `number` | `300` | 单文件下载超时 (秒)。 |
 | `downloadConcurrency` | `number` | `3` | 同时下载文件的最大数量。 |
 

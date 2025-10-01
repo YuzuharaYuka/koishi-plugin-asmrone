@@ -17,6 +17,12 @@ export interface CacheSettings {
   cacheMaxAge: number;
 }
 
+// [NEW] 渲染缓存配置接口
+export interface RenderCacheSettings {
+  enableRenderCache: boolean;
+  renderCacheMaxAge: number;
+}
+
 export interface Config {
   useForward: boolean;
   showSearchImage: boolean;
@@ -31,7 +37,7 @@ export interface Config {
   blacklist: string[];
   defaultSendMode: SendMode;
   cardModeNonAudioAction: CardModeNonAudioAction;
-  voiceModeNonAudioAction: VoiceModeNonAudioAction; // [NEW]
+  voiceModeNonAudioAction: VoiceModeNonAudioAction;
   downloadTimeout: number;
   downloadConcurrency: number;
   apiBaseUrl: string;
@@ -45,6 +51,7 @@ export interface Config {
   prependRjCodeZip: boolean;
   prependRjCodeLink: boolean;
   cache: CacheSettings;
+  renderCache: RenderCacheSettings; // [NEW]
 }
 
 export const Config = Schema.intersect([
@@ -93,13 +100,12 @@ export const Config = Schema.intersect([
             Schema.const(SendMode.FILE).description('音频文件 (file)'),
             Schema.const(SendMode.ZIP).description('压缩包 (zip)'),
             Schema.const(SendMode.LINK).description('下载链接 (link)'),
-            Schema.const(SendMode.VOICE).description('语音 (voice)'), // [NEW]
+            Schema.const(SendMode.VOICE).description('语音 (voice)'),
         ]).default(SendMode.FILE).description('默认音轨发送方式。'),
         cardModeNonAudioAction: Schema.union([
             Schema.const(CardModeNonAudioAction.SKIP).description('跳过 (默认)'),
             Schema.const(CardModeNonAudioAction.FALLBACK).description('转为 file 模式发送'),
         ]).default(CardModeNonAudioAction.SKIP).description('Card模式下对非音频文件的操作。'),
-        // [NEW] voice 模式的配置
         voiceModeNonAudioAction: Schema.union([
             Schema.const(VoiceModeNonAudioAction.SKIP).description('跳过 (默认)'),
             Schema.const(VoiceModeNonAudioAction.FALLBACK).description('转为 file 模式发送'),
@@ -112,7 +118,12 @@ export const Config = Schema.intersect([
         cache: Schema.object({
             enableCache: Schema.boolean().default(true).description('启用音频文件缓存以提高重复请求的速度。'),
             cacheMaxAge: Schema.number().min(0).default(24).description('缓存文件最长保留时间 (小时)。设置为 0 表示永久保留 (直到插件停用)。'),
-        }).description('缓存设置')
+        }).description('音频缓存设置'), // [MODIFIED] 标题更明确
+        // [NEW] 渲染缓存配置
+        renderCache: Schema.object({
+          enableRenderCache: Schema.boolean().default(true).description('对生成的菜单图片进行缓存，大幅提高重复请求的速度。'),
+          renderCacheMaxAge: Schema.number().min(0).default(6).description('图片缓存最长保留时间 (小时)。设置为 0 表示永久保留。'),
+        }).description('图片渲染缓存设置'),
     }),
 
     Schema.object({
