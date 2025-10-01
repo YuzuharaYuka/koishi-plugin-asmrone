@@ -3,22 +3,23 @@
 import { Context } from 'koishi'
 import { ApiSearchResponse, WorkInfoResponse, TrackItem } from '../common/types'
 import { Config } from '../config'
-import { USER_AGENT, RETRY_DELAY_MS } from '../common/constants' // [MODIFIED] 导入常量
+import { USER_AGENT, RETRY_DELAY_MS } from '../common/constants'
 
 interface CacheEntry<T> {
   data: T;
   expires: number;
 }
 
+// 封装了所有与 asmr.one API 的通信逻辑
 export class AsmrApi {
-  // [MODIFIED] 使用常量
   private requestOptions = {
     headers: { 'User-Agent': USER_AGENT },
   }
-  
+
   private cache = new Map<string, CacheEntry<any>>();
 
   constructor(private ctx: Context, private config: Config) {
+    // 自动修正用户可能填错的 API 地址
     if (this.config.apiBaseUrl && !this.config.apiBaseUrl.endsWith('/api')) {
       if (this.config.apiBaseUrl.endsWith('/')) {
         this.config.apiBaseUrl += 'api';
@@ -27,10 +28,11 @@ export class AsmrApi {
       }
       this.ctx.logger('asmrone').info(`自定义 API 地址已自动修正为: ${this.config.apiBaseUrl}`);
     }
-    
+
+    // 定期清理过期的内存缓存
     setInterval(() => this.cleanExpiredCache(), 5 * 60 * 1000);
   }
-  
+
   private cleanExpiredCache() {
     const now = Date.now();
     for (const [key, entry] of this.cache.entries()) {
@@ -40,6 +42,7 @@ export class AsmrApi {
     }
   }
 
+  // 通用的“先查缓存，再请求”的逻辑封装
   private async _fetchAndCache<T>(key: string, fetcher: () => Promise<T>, ttl: number = 5 * 60 * 1000): Promise<T> {
     const cached = this.cache.get(key);
     if (cached && cached.expires > Date.now()) {
@@ -53,6 +56,7 @@ export class AsmrApi {
     return data;
   }
 
+  // 封装了重试和统一错误处理的底层请求方法
   private async _requestWithRetry<T>(url: string, method: 'get' | 'post', payload?: any): Promise<T> {
     let lastError: Error | null = null;
     for (let i = 0; i < this.config.maxRetries; i++) {
@@ -61,21 +65,21 @@ export class AsmrApi {
         const response = method === 'post'
           ? await this.ctx.http.post<T>(url, payload, this.requestOptions)
           : await this.ctx.http.get<T>(url, this.requestOptions);
-        
+
         if (this.config.debug) {
-            this.ctx.logger('asmrone').info(`[Debug] API Response (Attempt ${i + 1}):\n${JSON.stringify(response, null, 2)}`);
+          this.ctx.logger('asmrone').info(`[Debug] API Response (Attempt ${i + 1}):\n${JSON.stringify(response, null, 2)}`);
         }
         return response;
       } catch (error) {
         lastError = error;
         this.ctx.logger('asmrone').warn(`API request to ${url} failed on attempt ${i + 1}/${this.config.maxRetries}. Retrying...`);
         if (i < this.config.maxRetries - 1) {
-            // [MODIFIED] 使用常量
-            await new Promise(res => setTimeout(res, RETRY_DELAY_MS));
+          await new Promise(res => setTimeout(res, RETRY_DELAY_MS));
         }
       }
     }
-    
+
+    // 根据最后一次的错误类型，生成对用户更友好的提示信息
     let finalError = new Error(`API 请求失败 (共 ${this.config.maxRetries} 次尝试)。`);
     if (this.ctx.http.isError(lastError)) {
       const status = lastError.response?.status;
@@ -113,12 +117,12 @@ export class AsmrApi {
   }
 
   async getPopular(page: number): Promise<ApiSearchResponse> {
-    const payload = { 
-      keyword: ' ', 
-      page, 
-      pageSize: this.config.pageSize, 
-      subtitle: 0, 
-      localSubtitledWorks: [], 
+    const payload = {
+      keyword: ' ',
+      page,
+      pageSize: this.config.pageSize,
+      subtitle: 0,
+      localSubtitledWorks: [],
       withPlaylistStatus: [],
     };
     const url = `${this.config.apiBaseUrl}/recommender/popular`;
@@ -128,37 +132,41 @@ export class AsmrApi {
   async getWorkInfo(rid: string): Promise<WorkInfoResponse> {
     const cacheKey = `workInfo:${rid}`;
     return this._fetchAndCache(cacheKey, () => {
-        const url = `${this.config.apiBaseUrl}/workInfo/${rid}`;
-        return this._requestWithRetry<WorkInfoResponse>(url, 'get');
+      const url = `${this.config.apiBaseUrl}/workInfo/${rid}`;
+      return this._requestWithRetry<WorkInfoResponse>(url, 'get');
     });
   }
+
+
 
   async getTracks(rid: string): Promise<TrackItem[]> {
     const cacheKey = `tracks:${rid}`;
     return this._fetchAndCache(cacheKey, () => {
-        const url = `${this.config.apiBaseUrl}/tracks/${rid}`;
-        return this._requestWithRetry<TrackItem[]>(url, 'get');
+      const url = `${this.config.apiBaseUrl}/tracks/${rid}`;
+      return this._requestWithRetry<TrackItem[]>(url, 'get');
     });
   }
 
   async downloadImageAsDataUri(url: string): Promise<string | null> {
     const cacheKey = `imgDataUri:${url}`;
     return this._fetchAndCache(cacheKey, async () => {
-        for (let i = 0; i < this.config.maxRetries; i++) {
-          try {
-            const buffer = await this.ctx.http.get<ArrayBuffer>(url, { ...this.requestOptions, responseType: 'arraybuffer', timeout: 15000 });
-            const base64 = Buffer.from(buffer).toString('base64');
-            const mime = url.includes('.png') ? 'image/png' : 'image/jpeg';
-            return `data:${mime};base64,${base64}`;
-          } catch (error) {
-            this.ctx.logger('asmrone').warn(`下载封面图片失败 %s (Attempt ${i + 1}/${this.config.maxRetries}): %o`, url, error);
-            if (i < this.config.maxRetries - 1) {
-              await new Promise(res => setTimeout(res, 1000));
-            }
+      for (let i = 0; i < this.config.maxRetries; i++) {
+        try {
+          const buffer = await this.ctx.http.get<ArrayBuffer>(url, { ...this.requestOptions, responseType: 'arraybuffer', timeout: 15000 });
+          const base64 = Buffer.from(buffer).toString('base64');
+          const mime = url.includes('.png') ? 'image/png' : 'image/jpeg';
+          return `data:${mime};base64,${base64}`;
+        } catch (error) {
+          this.ctx.logger('asmrone').warn(`下载封面图片失败 %s (Attempt ${i + 1}/${this.config.maxRetries}): %o`, url, error);
+          if (i < this.config.maxRetries - 1) {
+            await new Promise(res => setTimeout(res, 1000));
           }
         }
-        this.ctx.logger('asmrone').error(`下载封面图片失败 %s after ${this.config.maxRetries} attempts.`, url);
-        return null;
+      }
+      this.ctx.logger('asmrone').error(`下载封面图片失败 %s after ${this.config.maxRetries} attempts.`, url);
+      return null;
     }, 60 * 60 * 1000);
   }
 }
+
+// --- END OF FILE src/services/api.ts ---

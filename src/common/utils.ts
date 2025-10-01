@@ -1,4 +1,4 @@
-// --- START OF FILE src/common/utils.ts --- 
+// --- START OF FILE src/common/utils.ts ---
 
 import { TrackItem, DisplayItem, ProcessedFile } from './types'
 
@@ -43,24 +43,25 @@ export function formatTrackSize(bytes: number): string {
   return `${mb.toFixed(2)} MB`;
 }
 
+// 解析用户输入的音轨序号，支持单个数字和范围 (如 "1 3-5")
 export function parseTrackIndices(args: string[]): number[] {
-    const indices: number[] = [];
-    for (const arg of args) {
-        if (arg.includes('-')) {
-            const [start, end] = arg.split('-').map(n => parseInt(n, 10));
-            if (!isNaN(start) && !isNaN(end) && start > 0 && end >= start) {
-                for (let i = start; i <= end; i++) {
-                    indices.push(i);
-                }
-            }
-        } else {
-            const num = parseInt(arg, 10);
-            if (!isNaN(num) && num > 0) {
-                indices.push(num);
-            }
+  const indices: number[] = [];
+  for (const arg of args) {
+    if (arg.includes('-')) {
+      const [start, end] = arg.split('-').map(n => parseInt(n, 10));
+      if (!isNaN(start) && !isNaN(end) && start > 0 && end >= start) {
+        for (let i = start; i <= end; i++) {
+          indices.push(i);
         }
+      }
+    } else {
+      const num = parseInt(arg, 10);
+      if (!isNaN(num) && num > 0) {
+        indices.push(num);
+      }
     }
-    return [...new Set(indices)].sort((a, b) => a - b);
+  }
+  return [...new Set(indices)].sort((a, b) => a - b);
 }
 
 export const getSafeFilename = (name: string) => name.replace(/[\/\\?%*:|"<>]/g, '_');
@@ -87,20 +88,22 @@ export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem
     return 'unknown';
   }
 
+  // 定义文件和文件夹的排序逻辑
   const sorter = (a: TrackItem, b: TrackItem) => {
     const typePriority = {
-        audio: 0, video: 1, image: 2, subtitle: 3, doc: 4, unknown: 5, folder: 6
+      audio: 0, video: 1, image: 2, subtitle: 3, doc: 4, unknown: 5, folder: 6
     };
     const typeA = getFileType(a);
     const typeB = getFileType(b);
     const priorityA = typePriority[typeA];
     const priorityB = typePriority[typeB];
     if (priorityA !== priorityB) {
-        return priorityA - priorityB;
+      return priorityA - priorityB;
     }
     return a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' });
   };
-  
+
+  // 递归遍历文件树
   function traverse(item: TrackItem, depth: number, currentPath: string) {
     const fileType = getFileType(item);
     const isDownloadable = !!item.mediaDownloadUrl;
@@ -140,3 +143,5 @@ export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem
 
   return { displayItems, processedFiles };
 }
+
+// --- END OF FILE src/common/utils.ts ---

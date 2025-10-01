@@ -1,3 +1,5 @@
+// --- START OF FILE src/services/renderer.ts ---
+
 import { Context, h, Logger } from 'koishi'
 import * as PImage from 'pureimage'
 import { promises as fs } from 'fs'
@@ -10,46 +12,13 @@ import { formatWorkDuration } from '../common/utils'
 export class Renderer {
   private logger: Logger
   private renderCacheDir: string
-  
+
   constructor(private ctx: Context, private config: Config, renderCacheDir: string) {
     this.logger = ctx.logger('asmrone')
     this.renderCacheDir = renderCacheDir
   }
 
-  private async _applyAntiCensorship(imageBuffer: Buffer): Promise<Buffer> {
-    try {
-      const bufferStream = new PassThrough();
-      bufferStream.end(imageBuffer);
-      const img = await PImage.decodePNGFromStream(bufferStream);
-
-      const ctx = img.getContext('2d');
-      const randomX = Math.floor(Math.random() * img.width);
-      const randomY = Math.floor(Math.random() * img.height);
-      const randomAlpha = Math.random() * 0.1;
-      ctx.fillStyle = `rgba(0,0,0,${randomAlpha.toFixed(2)})`;
-      ctx.fillRect(randomX, randomY, 1, 1);
-
-      const passThrough = new PassThrough();
-      const chunks: Buffer[] = [];
-      passThrough.on('data', (chunk) => chunks.push(chunk));
-      
-      const finishPromise = new Promise<void>((resolve, reject) => {
-          passThrough.on('end', resolve);
-          passThrough.on('error', reject);
-      });
-
-      await PImage.encodePNGToStream(img, passThrough);
-      await finishPromise;
-      const processedImageBuffer = Buffer.concat(chunks);
-      this.logger.info(`[Anti-Censorship] Image processed. Added noise at (${randomX}, ${randomY}).`);
-      return processedImageBuffer;
-
-    } catch (error) {
-      this.logger.error('Error during image processing with pureimage: %o', error);
-      return imageBuffer;
-    }
-  }
-
+  // 核心公共方法：带缓存地渲染HTML为图片
   public async renderWithCache(cacheKey: string, htmlGenerator: () => Promise<string>): Promise<Buffer | null> {
     let cleanImageBuffer: Buffer | null = null;
 
@@ -76,29 +45,63 @@ export class Renderer {
 
       if (cleanImageBuffer && this.config.renderCache.enableRenderCache) {
         const cachePath = resolve(this.renderCacheDir, `${cacheKey}.png`);
-        
-        // [FIXED] 在写入文件前，确保目录存在，解决竞态条件问题
         fs.mkdir(this.renderCacheDir, { recursive: true })
           .then(() => fs.writeFile(cachePath, cleanImageBuffer))
           .catch(err => this.logger.error(`[Render Cache] Failed to write cache for ${cacheKey}: %o`, err));
       }
     }
-    
+
     if (!cleanImageBuffer) return null;
 
     if (this.config.imageMenu?.enableAntiCensorship) {
       return this._applyAntiCensorship(cleanImageBuffer);
     }
-    
+
     return cleanImageBuffer;
   }
 
+  // 通过添加微小的随机噪点来对抗某些平台的图片审查
+  private async _applyAntiCensorship(imageBuffer: Buffer): Promise<Buffer> {
+    try {
+      const bufferStream = new PassThrough();
+      bufferStream.end(imageBuffer);
+      const img = await PImage.decodePNGFromStream(bufferStream);
+
+      const ctx = img.getContext('2d');
+      const randomX = Math.floor(Math.random() * img.width);
+      const randomY = Math.floor(Math.random() * img.height);
+      const randomAlpha = Math.random() * 0.1;
+      ctx.fillStyle = `rgba(0,0,0,${randomAlpha.toFixed(2)})`;
+      ctx.fillRect(randomX, randomY, 1, 1);
+
+      const passThrough = new PassThrough();
+      const chunks: Buffer[] = [];
+      passThrough.on('data', (chunk) => chunks.push(chunk));
+
+      const finishPromise = new Promise<void>((resolve, reject) => {
+        passThrough.on('end', resolve);
+        passThrough.on('error', reject);
+      });
+
+      await PImage.encodePNGToStream(img, passThrough);
+      await finishPromise;
+      const processedImageBuffer = Buffer.concat(chunks);
+      this.logger.info(`[Anti-Censorship] Image processed. Added noise at (${randomX}, ${randomY}).`);
+      return processedImageBuffer;
+
+    } catch (error) {
+      this.logger.error('Error during image processing with pureimage: %o', error);
+      return imageBuffer;
+    }
+  }
+
+  // 调用 puppeteer 服务将 HTML 字符串渲染为图片 Buffer
   private async _renderHtmlViaPuppeteer(html: string): Promise<Buffer | null> {
     if (!this.ctx.puppeteer) return null;
     let page;
     try {
       page = await this.ctx.puppeteer.page();
-      
+
       const scale = this.config.imageMenu?.imageRenderScale || 2;
       await page.setViewport({ width: 900, height: 600, deviceScaleFactor: scale });
 
@@ -114,10 +117,11 @@ export class Renderer {
     }
   }
 
+  // 生成图片菜单的通用 CSS 样式
   private getMenuStyle(): string {
     const { imageMenu } = this.config;
     const {
-        backgroundColor, itemBackgroundColor, textColor, titleColor, accentColor, highlightColor
+      backgroundColor, itemBackgroundColor, textColor, titleColor, accentColor, highlightColor
     } = imageMenu || {};
 
     const safeBackgroundColor = backgroundColor || '#1e1e1e';
@@ -126,21 +130,21 @@ export class Renderer {
     const safeTitleColor = titleColor || '#9cdcfe';
     const safeAccentColor = accentColor || '#4ec9b0';
     const safeHighlightColor = highlightColor || '#c586c0';
-    
+
     const tagBgColor = '#3c3c3c';
     const tagTextColor = '#d0d0d0';
 
     return `
-      :root { 
-        --bg-color: ${h.escape(safeBackgroundColor)}; 
-        --item-bg-color: ${h.escape(safeItemBgColor)}; 
-        --text-color: ${h.escape(safeTextColor)}; 
+      :root {
+        --bg-color: ${h.escape(safeBackgroundColor)};
+        --item-bg-color: ${h.escape(safeItemBgColor)};
+        --text-color: ${h.escape(safeTextColor)};
         --text-light-color: ${h.escape(safeTextColor)}d0;
-        --title-color: ${h.escape(safeTitleColor)}; 
-        --accent-color: ${h.escape(safeAccentColor)}; 
-        --highlight-color: ${h.escape(safeHighlightColor)}; 
-        --tag-bg-color: ${tagBgColor}; 
-        --tag-text-color: ${tagTextColor}; 
+        --title-color: ${h.escape(safeTitleColor)};
+        --accent-color: ${h.escape(safeAccentColor)};
+        --highlight-color: ${h.escape(safeHighlightColor)};
+        --tag-bg-color: ${tagBgColor};
+        --tag-text-color: ${tagTextColor};
       }
       body { background-color: var(--bg-color); color: var(--text-color); font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; margin: 0; padding: 20px; box-sizing: border-box;}
       .container { max-width: 860px; margin: auto; }
@@ -148,13 +152,14 @@ export class Renderer {
     `;
   }
 
+  // 创建搜索结果列表的 HTML
   createSearchHtml(works: BaseWork[], keyword: string, pageNum: number, total: number): string {
     const worksHtml = works.map((work, index) => {
-        const rjCode = `RJ${String(work.id).padStart(8, '0')}`;
-        const cvs = work.vas.map(v => h.escape(v.name)).join(', ') || '未知';
-        const tags = work.tags.slice(0, 20).map(t => `<span class="tag">${h.escape(t.name)}</span>`).join('');
-        const duration = formatWorkDuration(work.duration);
-        return `
+      const rjCode = `RJ${String(work.id).padStart(8, '0')}`;
+      const cvs = work.vas.map(v => h.escape(v.name)).join(', ') || '未知';
+      const tags = work.tags.slice(0, 20).map(t => `<span class="tag">${h.escape(t.name)}</span>`).join('');
+      const duration = formatWorkDuration(work.duration);
+      return `
           <div class="work-item">
             <div class="index">${(pageNum - 1) * this.config.pageSize + index + 1}</div>
             <div class="cover-container"><img src="${work.mainCoverUrl}" class="cover" /></div>
@@ -168,7 +173,7 @@ export class Renderer {
               <div class="tags">${tags}</div>
             </div>
           </div>`;
-      }).join('');
+    }).join('');
     return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><style>
         ${this.getMenuStyle()}
         .work-item { display: flex; align-items: center; background-color: var(--item-bg-color); border-radius: 8px; padding: 15px; margin-bottom: 15px; border-left: 4px solid var(--accent-color); }
@@ -187,19 +192,20 @@ export class Renderer {
           ${worksHtml}
         </div></body></html>`;
   }
-  
+
+  // 创建作品详情页的 HTML
   createWorkInfoHtml(workInfo: WorkInfoResponse, displayItems: DisplayItem[], linksHtml: string): string {
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
     const cvs = workInfo.vas.map(v => h.escape(v.name)).join(', ') || '未知';
     const tags = workInfo.tags.map(t => `<span class="tag">${h.escape(t.name)}</span>`).join('');
-    
+
     const fileIcons = { folder: '📁', audio: '🎵', image: '🖼️', video: '🎬', doc: '📄', subtitle: '📜', unknown: '❔' };
 
     const trackHtml = displayItems.map((item) => {
-        const icon = fileIcons[item.type] || fileIcons.unknown;
-        const indexHtml = item.fileIndex ? `<span class="track-index">${item.fileIndex}.</span>` : `<span class="track-index non-dl"></span>`;
-        const itemClass = item.type === 'folder' ? 'folder-item' : 'file-item';
-        return `<li class="${itemClass}" style="padding-left: ${item.depth * 25}px;">
+      const icon = fileIcons[item.type] || fileIcons.unknown;
+      const indexHtml = item.fileIndex ? `<span class="track-index">${item.fileIndex}.</span>` : `<span class="track-index non-dl"></span>`;
+      const itemClass = item.type === 'folder' ? 'folder-item' : 'file-item';
+      return `<li class="${itemClass}" style="padding-left: ${item.depth * 25}px;">
                   <div class="track-title"> ${indexHtml} <span class="track-icon">${icon}</span> <span>${h.escape(item.title)}</span> </div>
                   <div class="track-meta">${item.meta}</div>
                 </li>`;
@@ -222,20 +228,15 @@ export class Renderer {
     return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><style>
         ${this.getMenuStyle()}
         .work-info-container { max-width: 860px; margin: auto; background-color: var(--item-bg-color); border-radius: 8px; padding: 30px; }
-        
         .rj-code { font-size: 30px; font-weight: bold; color: var(--title-color); margin-bottom: 8px; text-align: left; }
         .title { font-size: 30px; font-weight: bold; color: var(--title-color); text-align: left; margin-bottom: 25px; }
-        
         .cover-container { width: 100%; aspect-ratio: 560 / 420; border-radius: 8px; overflow: hidden; margin: 0 auto 25px auto; background-size: cover; background-position: center; }
-        
         .info-block { text-align: left; }
         .detail-item { font-size: 18px; color: var(--text-light-color); margin-bottom: 12px; }
         .detail-item strong { color: var(--text-color); }
         .detail-item a { color: var(--accent-color); text-decoration: none; word-break: break-all; }
-        
         .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
         .tag { background-color: var(--tag-bg-color); color: var(--tag-text-color); padding: 5px 12px; border-radius: 5px; font-size: 16px; }
-        
         .divider { border: 0; height: 1px; background-color: #444; margin: 30px 0; }
         .track-list h2 { font-size: 24px; color: var(--accent-color); margin-bottom: 15px; }
         .track-list ol { list-style: none; padding-left: 0; margin: 0; color: var(--text-color); font-size: 18px; }
@@ -251,17 +252,15 @@ export class Renderer {
         <div class="work-info-container">
           <div class="rj-code">${h.escape(rjCode)}</div>
           <h1 class="title">${h.escape(workInfo.title)}</h1>
-          
           <div class="cover-container" style="background-image: url('${workInfo.mainCoverUrl}')"></div>
-
           <div class="info-block">
               ${detailsHtml}
               ${finalLinksHtml}
               <div class="tags">${tags}</div>
           </div>
-          
           <hr class="divider" />
           <div class="track-list"><h2>文件列表</h2><ol>${trackHtml}</ol></div>
         </div></body></html>`;
   }
 }
+// --- END OF FILE src/services/renderer.ts ---

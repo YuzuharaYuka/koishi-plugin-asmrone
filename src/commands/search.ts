@@ -1,14 +1,16 @@
+// --- START OF FILE src/commands/search.ts ---
+
 import { Context } from 'koishi'
 import { CommandHandler, orderKeys } from './handler'
 
 export function registerSearchCommand(ctx: Context, handler: CommandHandler) {
   ctx.command('搜音声 <query...>', '搜索音声作品')
     .usage(
-`搜音声 <关键词> [筛选条件] [排序方式] [页码]
+      `搜音声 <关键词> [筛选条件] [排序方式] [页码]
 
 关键词: 直接输入，多个词用空格分隔。
-筛选条件: 使用 key:value 格式。
-排序条件: 使用 order:排序值 格式。
+筛选条件: key:value 格式。
+排序条件: order:排序值 格式。
 页码: 指令末尾的单个数字。
 
 筛选条件 (key:value):
@@ -32,3 +34,4 @@ ${orderKeys.join(', ')}`
       return handler.handleSearch(session, query.join(' '));
     });
 }
+// --- END OF FILE src/commands/search.ts ---

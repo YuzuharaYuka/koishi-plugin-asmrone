@@ -1,3 +1,5 @@
+// --- START OF FILE src/index.ts ---
+
 import { Context, Logger, Time } from 'koishi'
 import { promises as fs } from 'fs'
 import { resolve, join } from 'path'
@@ -11,6 +13,7 @@ import { registerListenCommand } from './commands/listen'
 import { registerPopularCommand } from './commands/popular'
 import { registerSearchCommand } from './commands/search'
 
+// 依赖 archiver-zip-encrypted 来支持加密压缩包
 if (!archiver.isRegisteredFormat('zip-encrypted')) {
   archiver.registerFormat('zip-encrypted', require("archiver-zip-encrypted"));
 }
@@ -19,8 +22,8 @@ export const name = 'asmrone'
 export const inject = ['http', 'puppeteer']
 export { Config } from './config'
 
+// 定义 `help asmrone` 指令所展示的帮助信息
 export const usage = `
-
 ##	注意：部分内容可能不适合在所有场合使用 (NSFW)，请在合适的范围内使用本插件。
 
 ---
@@ -57,90 +60,95 @@ export const usage = `
 #### 交互操作
 *	**列表页**: 回复\`序号\`选择作品，\`F\` 下一页，\`P\` 上一页，\`N\` 取消。
 *	**详情页**: 回复\`序号\`选择文件，如 \`1 3-5 [发送方式]\`，\`B\` 返回列表， \`N\` 取消。
- 
+
 ---
 
-*	**发送图片或文件失败，大概率是由平台风控导致，请尽量使用图片菜单，尽量避免无加密直接发送文件。**
-*	**音乐卡片\`card\`模式需要配置音乐签名服务 url，且仅在 onebot 平台可用，请确保bot使用的框架配置支持。**
-*	**语音\`voice\`模式需要配置 silk 服务或 ffmpeg ，且音质较差，仅推荐作为预览方式，不建议转换过大的音频文件，资源占用很高。**
-` 
+#### 注意事项
+*	显示发送成功但看不到图片、文件或报错，大概率是由**平台风控**导致，请尽量使用图片菜单，避免无加密直接发送文件。
+*	音乐卡片\`card\`模式需要配置音乐签名服务url，且仅在 onebot 平台可用，请确保bot框架配置支持(如napcat)。
+*	语音\`voice\`模式需要配置 silk 服务或 ffmpeg ，且音质较差，仅建议作为预览方式，不建议转换过大的音频文件，资源占用很高。
+*	如果遇到问题或有建议，反馈请通过[issue](https://github.com/YuzuharaYuka/koishi-plugin-asmrone/issues)。
+`
 
+// 定期清理过期的音频缓存文件
 async function cleanupAudioCache(logger: Logger, audioTempDir: string, maxAgeHours: number) {
-    if (maxAgeHours <= 0) return;
-    const maxAgeMs = maxAgeHours * 3600 * 1000;
-    const now = Date.now();
-    let cleanedCount = 0;
+  if (maxAgeHours <= 0) return;
+  const maxAgeMs = maxAgeHours * 3600 * 1000;
+  const now = Date.now();
+  let cleanedCount = 0;
 
-    try {
-        const rjFolders = await fs.readdir(audioTempDir, { withFileTypes: true });
-        for (const rjFolder of rjFolders) {
-            if (rjFolder.isDirectory()) {
-                const folderPath = join(audioTempDir, rjFolder.name);
-                try {
-                  const files = await fs.readdir(folderPath);
-                  for (const file of files) {
-                      const filePath = join(folderPath, file);
-                      try {
-                          const stats = await fs.stat(filePath);
-                          if (now - stats.mtimeMs > maxAgeMs) {
-                              await fs.unlink(filePath);
-                              cleanedCount++;
-                          }
-                      } catch (err) { /* L2 error */ }
-                  }
-                } catch (err) { /* L1 error */ }
-            }
-        }
-        if (cleanedCount > 0) {
-            logger.info(`[Audio Cache] Cleaned up ${cleanedCount} expired audio cache file(s).`);
-        }
-    } catch (error) {
-        if (error.code !== 'ENOENT') logger.error(`[Audio Cache] Error during cleanup: ${error.message}`);
-    }
-}
-
-async function cleanupRenderCache(logger: Logger, renderCacheDir: string, maxAgeHours: number) {
-    if (maxAgeHours <= 0) return;
-    const maxAgeMs = maxAgeHours * 3600 * 1000;
-    const now = Date.now();
-    let cleanedCount = 0;
-
-    try {
-        const files = await fs.readdir(renderCacheDir);
-        for (const file of files) {
-            const filePath = join(renderCacheDir, file);
+  try {
+    const rjFolders = await fs.readdir(audioTempDir, { withFileTypes: true });
+    for (const rjFolder of rjFolders) {
+      if (rjFolder.isDirectory()) {
+        const folderPath = join(audioTempDir, rjFolder.name);
+        try {
+          const files = await fs.readdir(folderPath);
+          for (const file of files) {
+            const filePath = join(folderPath, file);
             try {
-                const stats = await fs.stat(filePath);
-                if (now - stats.mtimeMs > maxAgeMs) {
-                    await fs.unlink(filePath);
-                    cleanedCount++;
-                }
-            } catch (err) {
-                logger.warn(`Failed to process render cache file ${filePath}: ${err.message}`);
-            }
-        }
-        if (cleanedCount > 0) {
-            logger.info(`[Render Cache] Cleaned up ${cleanedCount} expired image(s).`);
-        }
-    } catch (error) {
-        if (error.code !== 'ENOENT') {
-            logger.error(`[Render Cache] Error during cleanup: ${error.message}`);
-        }
+              const stats = await fs.stat(filePath);
+              if (now - stats.mtimeMs > maxAgeMs) {
+                await fs.unlink(filePath);
+                cleanedCount++;
+              }
+            } catch (err) { /* 忽略单个文件处理失败 */ }
+          }
+        } catch (err) { /* 忽略单个RJ目录处理失败 */ }
+      }
     }
+    if (cleanedCount > 0) {
+      logger.info(`[Audio Cache] Cleaned up ${cleanedCount} expired audio cache file(s).`);
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') logger.error(`[Audio Cache] Error during cleanup: ${error.message}`);
+  }
 }
 
+// 定期清理过期的渲染图片缓存
+async function cleanupRenderCache(logger: Logger, renderCacheDir: string, maxAgeHours: number) {
+  if (maxAgeHours <= 0) return;
+  const maxAgeMs = maxAgeHours * 3600 * 1000;
+  const now = Date.now();
+  let cleanedCount = 0;
 
+  try {
+    const files = await fs.readdir(renderCacheDir);
+    for (const file of files) {
+      const filePath = join(renderCacheDir, file);
+      try {
+        const stats = await fs.stat(filePath);
+        if (now - stats.mtimeMs > maxAgeMs) {
+          await fs.unlink(filePath);
+          cleanedCount++;
+        }
+      } catch (err) {
+        logger.warn(`Failed to process render cache file ${filePath}: ${err.message}`);
+      }
+    }
+    if (cleanedCount > 0) {
+      logger.info(`[Render Cache] Cleaned up ${cleanedCount} expired image(s).`);
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      logger.error(`[Render Cache] Error during cleanup: ${error.message}`);
+    }
+  }
+}
+
+// 插件的主入口函数
 export function apply(ctx: Context, config: Config) {
   const logger = ctx.logger('asmrone');
-  // [MODIFIED] 更改了基础路径，将其指向 'data/temp/asmrone'
   const tempDir = resolve(ctx.baseDir, 'data', 'temp', 'asmrone');
   const renderCacheDir = resolve(tempDir, 'render-cache');
 
+  // 实例化所有服务
   const api = new AsmrApi(ctx, config);
   const renderer = new Renderer(ctx, config, renderCacheDir);
   const sender = new TrackSender(ctx, config, tempDir);
   const commandHandler = new CommandHandler(ctx, config, api, renderer, sender);
 
+  // 注册插件启动时的生命周期钩子
   ctx.on('ready', async () => {
     try {
       await fs.mkdir(tempDir, { recursive: true });
@@ -149,6 +157,7 @@ export function apply(ctx: Context, config: Config) {
     } catch (error) {
       logger.error('创建临时目录失败: %o', error);
     }
+    // 启动定时缓存清理任务
     if (config.cache.enableCache) {
       cleanupAudioCache(logger, tempDir, config.cache.cacheMaxAge);
       ctx.setInterval(() => cleanupAudioCache(logger, tempDir, config.cache.cacheMaxAge), Time.hour);
@@ -159,6 +168,7 @@ export function apply(ctx: Context, config: Config) {
     }
   });
 
+  // 注册插件停用时的生命周期钩子
   ctx.on('dispose', async () => {
     try {
       await fs.rm(tempDir, { recursive: true, force: true });
@@ -167,8 +177,10 @@ export function apply(ctx: Context, config: Config) {
       logger.error('清理临时文件目录失败: %o', error);
     }
   });
-  
+
+  // 注册所有指令
   registerPopularCommand(ctx, commandHandler);
   registerSearchCommand(ctx, commandHandler);
   registerListenCommand(ctx, commandHandler);
 }
+// --- END OF FILE src/index.ts ---
