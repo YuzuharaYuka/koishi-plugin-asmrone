@@ -12,12 +12,13 @@
 - **结果展示**: 支持两种模式展示搜索结果和作品详情：
   - **图片菜单**: (需 `puppeteer`) 将内容渲染为图片发送，美观且能规避平台风控。
   - **文本消息**: 以纯文本或合并转发的形式发送。
-- **音轨获取**: 支持多种方式发送音轨：
+- **多种收听方式**: 支持多种方式发送音轨：
   - **`card`**: 音乐卡片 (仅部分平台支持，如 OneBot)。
   - **`file`**: 逐个发送原始音频文件。
   - **`zip`**: 将多个音轨打包为 ZIP 压缩包发送，支持加密和自定义压缩级别。
-  - **`link`**: 发送音轨的直接下载链接，在支持的平台会以合并转发形式发送。
-  - **`voice`**: 以语音形式发送 (仅部分平台支持，需配置 FFmpeg，且有性能开销)。
+  - **`link`**: 发送音轨的直接下载链接。
+  - **`player`**: 发送一个在线播放器链接。
+  - **`voice`**: 以语音形式发送 (仅部分平台支持，需配置 FFmpeg)。
 - **交互式操作**:
   - 列表指令后可回复序号选择，[F]下一页，[P]上一页。
   - 详情页可回复[B]返回列表。
@@ -80,7 +81,7 @@
 - **`音轨序号` (可选)**: 一个或多个数字序号或范围，用空格分隔 (如 `1 3 5-8`)。
   - 若提供，则直接获取指定音轨。
   - 若省略，则返回作品详情并等待交互选择。
-- **`发送方式` (可选)**: `card` | `file` | `zip` | `link` | `voice`。
+- **`发送方式` (可选)**: `card` | `file` | `zip` | `link` | `player` | `voice`。
   - 指定本次发送的格式，若省略则使用配置中的默认方式。
 
 #### **使用示例**
@@ -101,7 +102,7 @@
 
 3. **在交互中指定发送方式**:
 
-   > 使用 `听音声 RJ00123456` 后，可通过回复 `2 4-6 card` 来获取第 2、4、5、6 轨，并以音乐卡片形式发送。
+   > 使用 `听音声 RJ00123456` 后，可通过回复 `2 4-6 player` 来获取第 2、4、5、6 轨，并以在线播放器形式收听。
 
 ## 配置项
 
@@ -130,7 +131,7 @@
 
 | 配置项                    | 类型     | 默认值   | 说明                                                         |
 | :------------------------ | :------- | :------- | :----------------------------------------------------------- |
-| `defaultSendMode`         | `string` | `file`   | 默认音轨发送方式: `card`, `file`, `zip`, `link`, `voice`。     |
+| `defaultSendMode`         | `string` | `file`   | 默认音轨发送方式: `card`, `file`, `zip`, `link`, `player`, `voice`。 |
 | `cardModeNonAudioAction`  | `string` | `skip`   | Card模式下对非音频文件的操作: `skip` (跳过) 或 `fallbackToFile` (转为file模式发送)。 |
 | `voiceModeNonAudioAction` | `string` | `skip`   | Voice模式下对非音频文件的操作: `skip` (跳过) 或 `fallbackToFile` (转为file模式发送)。 |
 | `downloadTimeout`         | `number` | `300`    | 单文件下载超时 (秒)。                                        |
@@ -143,6 +144,14 @@
 | `prependRjCodeCard`| `boolean` | `false` | Card 标题添加 RJ 号。       |
 | `prependRjCodeFile`| `boolean` | `true`  | File 文件名添加 RJ 号。     |
 | `prependRjCodeZip` | `boolean` | `true`  | Zip 包名/文件夹添加 RJ 号。 |
+| `prependRjCodeLink`| `boolean` | `true` | Link 模式标题添加 RJ 号。 |
+| `prependRjCodePlayer` | `boolean` | `true`  | Player 模式标题添加 RJ 号。 |
+
+### 在线播放器设置
+
+| 配置项 | 类型 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `playerBaseUrl` | `string` | `https://yuzuharayuka.github.io/amsrone-audio-player/` | 在线播放器页面的基础 URL。 |
 
 ### 压缩包设置
 
@@ -152,6 +161,15 @@
 | `zipCompressionLevel` | `number` | `1`      | ZIP 压缩级别 (0不压缩, 1最快, 9最高)。             |
 | `usePassword`         | `boolean`| `false`  | Zip 是否加密。                                     |
 | `password`            | `string` | `""`     | 压缩包密码 (需先启用 `usePassword`)。              |
+
+### 缓存设置
+
+| 配置项 | 类型 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `cache.enableCache`| `boolean`| `true` | 启用音频文件缓存，避免重复下载。 |
+| `cache.cacheMaxAge`| `number`| `24` | 缓存文件保留时间 (小时)，0 表示永久。 |
+| `renderCache.enableRenderCache` | `boolean` | `true` | 启用图片菜单的渲染缓存。 |
+| `renderCache.renderCacheMaxAge` | `number` | `6` | 图片缓存保留时间 (小时)，0 表示永久。 |
 
 ### 调试设置
 
