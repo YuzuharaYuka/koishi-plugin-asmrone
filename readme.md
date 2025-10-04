@@ -1,6 +1,6 @@
 # koishi-plugin-asmrone
 
-[![npm](https://img-shields.io/npm/v/koishi-plugin-asmrone?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-asmrone)
+[![npm](https://img.shields.io/npm/v/koishi-plugin-asmrone?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-asmrone)
 
 利用 [asmr.one](https://asmr.one) 的 API，提供在聊天平台中搜索、查看并收听音声作品的功能。
 
