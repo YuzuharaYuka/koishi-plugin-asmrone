@@ -7,6 +7,7 @@ export const SendMode = {
   FILE: 'file',
   ZIP: 'zip',
   LINK: 'link',
+  PLAYER: 'player', // 新增
   VOICE: 'voice',
 } as const;
 

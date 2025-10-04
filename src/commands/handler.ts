@@ -126,7 +126,7 @@ export class CommandHandler {
         return;
       }
 
-      const optionKeywords: SendMode[] = [SendMode.CARD, SendMode.FILE, SendMode.ZIP, SendMode.LINK, SendMode.VOICE];
+      const optionKeywords: SendMode[] = [SendMode.CARD, SendMode.FILE, SendMode.ZIP, SendMode.LINK, SendMode.PLAYER, SendMode.VOICE];
       let userOption: SendMode = null;
 
       const potentialOption = args[args.length - 1];
@@ -239,7 +239,7 @@ export class CommandHandler {
         return;
       }
 
-      let promptMessage = `请在 ${this.config.interactionTimeout} 秒内回复序号进行收听，如 1 3-5 [模式](可选 card, file, zip, link, voice)，`;
+      let promptMessage = `请在 ${this.config.interactionTimeout} 秒内回复序号进行收听，如 1 3-5 [模式](可选 card, file, zip, link, player, voice)，`;
       if (onBack) promptMessage += `[B]返回列表，`;
       promptMessage += `[N]取消。`;
       await session.send(promptMessage);
@@ -266,7 +266,7 @@ export class CommandHandler {
 
       const replyArgs = choice.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
       let mode: SendMode = null;
-      if ([SendMode.CARD, SendMode.FILE, SendMode.ZIP, SendMode.LINK, SendMode.VOICE].includes(replyArgs[replyArgs.length - 1] as any)) {
+      if ([SendMode.CARD, SendMode.FILE, SendMode.ZIP, SendMode.LINK, SendMode.PLAYER, SendMode.VOICE].includes(replyArgs[replyArgs.length - 1] as any)) {
         mode = replyArgs.pop() as SendMode;
       }
 

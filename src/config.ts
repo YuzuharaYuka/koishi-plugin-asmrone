@@ -24,6 +24,10 @@ export interface RenderCacheSettings {
   renderCacheMaxAge: number;
 }
 
+export interface PlayerSettings {
+  playerBaseUrl: string;
+}
+
 export interface Config {
   useForward: boolean;
   showSearchImage: boolean;
@@ -51,8 +55,10 @@ export interface Config {
   prependRjCodeFile: boolean;
   prependRjCodeZip: boolean;
   prependRjCodeLink: boolean;
+  prependRjCodePlayer: boolean;
   cache: CacheSettings;
   renderCache: RenderCacheSettings;
+  player: PlayerSettings;
 }
 
 export const Config = Schema.intersect([
@@ -102,6 +108,7 @@ export const Config = Schema.intersect([
       Schema.const(SendMode.FILE).description('音频文件 (file)'),
       Schema.const(SendMode.ZIP).description('压缩包 (zip)'),
       Schema.const(SendMode.LINK).description('下载链接 (link)'),
+      Schema.const(SendMode.PLAYER).description('在线播放器 (player)'),
       Schema.const(SendMode.VOICE).description('语音 (voice)'),
     ]).default(SendMode.FILE).description('默认音轨发送方式。'),
     cardModeNonAudioAction: Schema.union([
@@ -115,6 +122,12 @@ export const Config = Schema.intersect([
     downloadTimeout: Schema.number().default(300).description('单文件下载超时 (秒)。'),
     downloadConcurrency: Schema.number().min(1).max(10).default(3).description('同时下载文件的最大数量。'),
   }).description('下载与发送设置'),
+
+  Schema.object({
+    player: Schema.object({
+      playerBaseUrl: Schema.string().default('https://yuzuharayuka.github.io/amsrone-audio-player/').description('在线播放器页面的基础 URL。'),
+    }).description('在线播放器设置'),
+  }),
 
   Schema.object({
     cache: Schema.object({
@@ -132,6 +145,7 @@ export const Config = Schema.intersect([
     prependRjCodeFile: Schema.boolean().default(true).description('File 文件名添加 RJ 号。'),
     prependRjCodeZip: Schema.boolean().default(true).description('Zip 包名/文件夹添加 RJ 号。'),
     prependRjCodeLink: Schema.boolean().default(true).description('Link 模式标题添加 RJ 号。'),
+    prependRjCodePlayer: Schema.boolean().default(true).description('Player 模式标题添加 RJ 号。'),
   }).description('命名规则设置'),
 
   Schema.object({

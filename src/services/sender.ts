@@ -1,16 +1,37 @@
-// --- START OF FILE src/services/sender.ts ---
-
 import { Context, Session, h, Logger } from 'koishi'
 import { resolve } from 'path'
 import { promises as fs, createWriteStream } from 'fs'
 import { pathToFileURL } from 'url'
 import archiver from 'archiver'
+import pako from 'pako'
 import { ProcessedFile, ValidFile, WorkInfoResponse } from '../common/types'
 import { Config } from '../config'
 import { SendMode, ZipMode, CardModeNonAudioAction, VoiceModeNonAudioAction, USER_AGENT, RETRY_DELAY_MS, MIN_FILE_SIZE_BYTES, LINK_SEND_DELAY_MS, ONEBOT_MUSIC_CARD_TYPE } from '../common/constants'
 import { getSafeFilename, getZipFilename } from '../common/utils'
 
-// 追踪发送任务的成功与失败统计
+// --- V9 Payload 扩充字典 ---
+const URL_DICTIONARY = {
+  // d0-d9: API & Cover Domains
+  'd0': 'https://api.asmr-200.com/api/',
+  'd1': 'https://api.asmr.one/api/',
+  'd2': 'https://api.asmr-100.com/api/',
+  'd3': 'https://api.asmr-300.com/api/',
+
+  // a0-a9: Audio CDN Domains
+  'a0': 'https://raw.kiko-play-niptan.one/',
+  'a1': 'https://fast.kiko-play-niptan.one/',
+  'a2': 'https://large.kiko-play-niptan.one/',
+
+  // p0-p9: Common Paths
+  'p0': 'cover/',
+  'p1': 'media/download/',
+  'p2': 'media/stream/',
+};
+const REVERSE_URL_DICTIONARY = new Map<string, string>();
+Object.entries(URL_DICTIONARY).forEach(([key, value]) => {
+  REVERSE_URL_DICTIONARY.set(value, key);
+});
+
 interface SendResultTracker {
   success: number;
   failed: number;
@@ -20,14 +41,123 @@ interface SendResultTracker {
 export class TrackSender {
   private logger: Logger
   private requestOptions = {
-    headers: { 'User-Agent': USER_AGENT },
+    headers: { 'User--Agent': USER_AGENT },
   }
 
   constructor(private ctx: Context, private config: Config, private tempDir: string) {
     this.logger = ctx.logger('asmrone')
   }
 
-  // 公共入口：根据用户选择处理并发送音轨
+  // --- V9 优化版 ---
+  private async _sendAsPlayer(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
+    const playerBaseUrl = this.config.player?.playerBaseUrl;
+    if (!playerBaseUrl || !playerBaseUrl.startsWith('http')) {
+      await session.send('错误：未配置或配置了无效的在线播放器地址 (playerBaseUrl)。');
+      results.failed += validFiles.length;
+      results.reasons.add('未配置播放器');
+      return;
+    }
+
+    const audioFiles = validFiles.filter(vf => vf.file.type === 'audio');
+    if (audioFiles.length === 0) {
+        await session.send('选择的文件中没有可播放的音频。');
+        return;
+    }
+
+    // 1. RJ号转为36进制
+    const rjNum = parseInt(String(workInfo.id).replace(/^RJ/i, ''), 10);
+    const compressedRj = rjNum.toString(36);
+
+    // 2. 封面URL分段字典化
+    let coverPayload: string | (string | (string | string[])[])[];
+    const coverUrl = workInfo.mainCoverUrl;
+    let coverBaseFound = false;
+    for (const [domainKey, domainPrefix] of Object.entries(URL_DICTIONARY)) {
+        if (!domainKey.startsWith('d')) continue; // 只匹配域名
+        if (coverUrl.startsWith(domainPrefix)) {
+            const restOfUrl = coverUrl.substring(domainPrefix.length);
+            for (const [pathKey, pathPrefix] of Object.entries(URL_DICTIONARY)) {
+                if (!pathKey.startsWith('p')) continue; // 只匹配路径
+                if (restOfUrl.startsWith(pathPrefix)) {
+                    coverPayload = [[domainKey, pathKey], restOfUrl.substring(pathPrefix.length)];
+                    coverBaseFound = true;
+                    break;
+                }
+            }
+        }
+        if (coverBaseFound) break;
+    }
+    if (!coverBaseFound) {
+      coverPayload = coverUrl;
+    }
+
+    // 3. 音轨URL分段字典化 + 动态提取
+    const allAudioUrls = audioFiles.map(af => af.file.url);
+    let commonBase = this._findCommonBase(allAudioUrls);
+    let basePayload: string | (string | (string | string[])[])[];
+
+    let baseReplaced = false;
+    for (const [domainKey, domainPrefix] of Object.entries(URL_DICTIONARY)) {
+        if (!domainKey.startsWith('a') && !domainKey.startsWith('d')) continue; // 音频可以来自 a 或 d 类的域名
+        if (commonBase.startsWith(domainPrefix)) {
+            const restOfBase = commonBase.substring(domainPrefix.length);
+            for (const [pathKey, pathPrefix] of Object.entries(URL_DICTIONARY)) {
+                if (!pathKey.startsWith('p')) continue;
+                if (restOfBase.startsWith(pathPrefix)) {
+                    basePayload = [[domainKey, pathKey], restOfBase.substring(pathPrefix.length)];
+                    baseReplaced = true;
+                    break;
+                }
+            }
+        }
+        if (baseReplaced) break;
+    }
+    if (!baseReplaced) {
+        basePayload = commonBase;
+    }
+    
+    const tracks = audioFiles.map(({ file }) => {
+      const relativePath = commonBase ? file.url.substring(commonBase.length) : file.url;
+      return [relativePath, file.title];
+    });
+
+    // 4. 构建 V9 Payload
+    const payload = {
+      b: basePayload,
+      w: workInfo.title,
+      r: compressedRj,
+      c: coverPayload,
+      t: tracks,
+    };
+    
+    // 5. 压缩与编码
+    const jsonString = JSON.stringify(payload);
+    const compressed = pako.deflate(jsonString, { level: 9 });
+    const base64Payload = Buffer.from(compressed).toString('base64url');
+    const finalPlayerUrl = `${playerBaseUrl.endsWith('/') ? playerBaseUrl : playerBaseUrl + '/'}?p=${base64Payload}`;
+    
+    // 6. 发送消息
+    try {
+        const message = audioFiles.length > 1
+            ? `已为您生成包含 ${audioFiles.length} 个音轨的播放列表，请点击下方链接收听：`
+            : `请点击下方链接在线收听：`;
+        await session.send(message);
+        if (this.config.useForward && session.platform === 'onebot') {
+            const forwardMessage = h('message', { userId: session.bot.selfId, nickname: workInfo.title }, finalPlayerUrl);
+            await session.send(h('figure', forwardMessage));
+        } else {
+            await session.send(finalPlayerUrl);
+        }
+        results.success += audioFiles.length;
+    } catch (error) {
+        this.logger.error('发送播放链接失败: %o', error);
+        results.failed += audioFiles.length;
+        results.reasons.add('发送失败');
+        await session.send(`发送播放链接失败。`);
+    }
+  }
+  
+  // ( ... 其余所有方法都保持不变, 为简洁省略, 请保留你文件中的原有实现 ... )
   async processAndSendTracks(indices: number[], allFiles: ProcessedFile[], workInfo: WorkInfoResponse, session: Session, mode: SendMode) {
     const validFiles: ValidFile[] = indices
       .map(i => ({ index: i, file: allFiles[i - 1] }))
@@ -41,8 +171,10 @@ export class TrackSender {
     const results: SendResultTracker = { success: 0, failed: 0, reasons: new Set() };
     const nonAudioFilesToFallback: ValidFile[] = [];
 
-    // 根据发送模式进行分发
-    if (mode === SendMode.CARD) {
+    if (mode === SendMode.PLAYER) {
+      await this._sendAsPlayer(validFiles, workInfo, session, results);
+    } 
+    else if (mode === SendMode.CARD) {
       const audioFiles = validFiles.filter(vf => vf.file.type === 'audio');
       const nonAudioFiles = validFiles.filter(vf => vf.file.type !== 'audio');
       if (nonAudioFiles.length > 0) {
@@ -70,16 +202,15 @@ export class TrackSender {
       await this._sendAsZip(validFiles, workInfo, session, results);
     } else if (mode === SendMode.LINK) {
       await this._sendAsLink(validFiles, workInfo, session, results);
-    } else {
+    }
+    else {
       await this._sendAsFile(validFiles, workInfo, session, results);
     }
 
-    // 处理需要回退到文件模式发送的非音频文件
     if (nonAudioFilesToFallback.length > 0) {
       await this._sendAsFile(nonAudioFilesToFallback, workInfo, session, results);
     }
 
-    // 发送最终的统计结果
     let summary = '请求处理完毕。';
     if (results.success > 0) summary += ` 成功 ${results.success} 个。`;
     if (results.failed > 0) {
@@ -91,17 +222,33 @@ export class TrackSender {
     await session.send(summary);
   }
 
-  // 处理 Voice 模式发送逻辑
+  private _findCommonBase(urls: string[]): string {
+    if (!urls || urls.length === 0) return '';
+    if (urls.length === 1) {
+        const url = urls[0];
+        const lastSlash = url.lastIndexOf('/');
+        return lastSlash > -1 ? url.substring(0, lastSlash + 1) : '';
+    }
+    const sortedUrls = [...urls].sort();
+    const first = sortedUrls[0];
+    const last = sortedUrls[sortedUrls.length - 1];
+    let i = 0;
+    while (i < first.length && first[i] === last[i]) {
+        i++;
+    }
+    const commonPrefix = first.substring(0, i);
+    const lastSlash = commonPrefix.lastIndexOf('/');
+    return lastSlash > -1 ? commonPrefix.substring(0, lastSlash + 1) : '';
+  }
+
   private async _sendAsVoice(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     if (session.platform !== 'onebot') {
       await session.send('Voice模式：当前平台不支持，转为文件发送。');
       await this._sendAsFile(validFiles, workInfo, session, results);
       return;
     }
-
     await session.send(`正在发送 ${validFiles.length} 条语音...`);
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
-
     for (const { index, file } of validFiles) {
       let tempFilePath: string;
       try {
@@ -123,13 +270,9 @@ export class TrackSender {
       }
     }
   }
-
-  // 处理 Link 模式发送逻辑
   private async _sendAsLink(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     await session.send(`正在发送 ${validFiles.length} 个下载链接...`);
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
-
-    // 如果平台支持，优先使用合并转发
     if (session.platform === 'onebot' && typeof session.send === 'function') {
       try {
         const forwardMessages = validFiles.map(({ index, file }) => {
@@ -144,8 +287,6 @@ export class TrackSender {
         this.logger.warn('发送合并转发消息失败，回退到逐条发送模式: %o', error);
       }
     }
-
-    // 逐条发送链接作为备选方案
     for (const { index, file } of validFiles) {
       try {
         const title = this.config.prependRjCodeLink ? `${rjCode} ${file.title}` : file.title;
@@ -160,8 +301,6 @@ export class TrackSender {
       }
     }
   }
-
-  // 处理 Card 模式发送逻辑
   private async _sendAsCard(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     if (session.platform !== 'onebot') {
       await session.send('Card模式：当前平台不支持，转为文件发送。');
@@ -171,7 +310,6 @@ export class TrackSender {
     await session.send(`正在发送 ${validFiles.length} 个音乐卡片...`);
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
     const cvs = workInfo.vas?.map(v => v.name).join(', ') || '未知声优';
-
     for (const { index, file } of validFiles) {
       try {
         const musicPayload = [{
@@ -199,19 +337,14 @@ export class TrackSender {
       }
     }
   }
-
-  // 处理 File 模式发送逻辑
   private async _sendAsFile(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     await session.send(`开始发送 ${validFiles.length} 个文件...`);
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
-
     const downloadWorker = ({ index, file }: ValidFile) =>
       this._getCachedFileOrDownload(file, rjCode)
         .then(buffer => ({ status: 'fulfilled' as const, value: { buffer, file, index } }))
         .catch(error => ({ status: 'rejected' as const, reason: error, index, title: file.title }));
-
     const downloadResults = await this.downloadFilesWithConcurrency(validFiles, downloadWorker);
-
     for (const result of downloadResults) {
       let tempFilePath: string;
       if (result.status === 'fulfilled') {
@@ -240,8 +373,6 @@ export class TrackSender {
       }
     }
   }
-
-  // 处理 Zip 模式发送逻辑 (分发)
   private async _sendAsZip(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     if (this.config.zipMode === ZipMode.SINGLE) {
       await this.handleSingleZip(validFiles, workInfo, session, results);
@@ -253,8 +384,6 @@ export class TrackSender {
       await session.send(`ZIP 密码: ${this.config.password}`);
     }
   }
-
-  // Zip 模式：合并为单个压缩包
   private async handleSingleZip(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     await session.send(`正在准备压缩${validFiles.length}个文件...`);
     let tempZipPath: string;
@@ -263,11 +392,9 @@ export class TrackSender {
       const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
       const zipFileTitle = this.config.prependRjCodeZip ? `${rjCode} ${workInfo.title}` : workInfo.title;
       const zipFilename = getZipFilename(zipFileTitle);
-
       const { archive, finishPromise, tempPath } = this.createZipArchiveStream(zipFilename);
       tempZipPath = tempPath;
       let filesAdded = 0;
-
       for (const { index, file } of validFiles) {
         try {
           const filePathOnDisk = await this._getCachedFilePathOrDownload(file, rjCode);
@@ -283,7 +410,6 @@ export class TrackSender {
           results.reasons.add('下载失败');
         }
       }
-
       if (filesAdded > 0) {
         await session.send(`已处理 ${filesAdded} 个文件，正在压缩...`);
         await archive.finalize();
@@ -295,7 +421,6 @@ export class TrackSender {
         archive.abort();
         await session.send('所有文件均下载失败，压缩取消。');
       }
-
     } catch (error) {
       this.logger.error('创建或发送合并压缩包失败: %o', error);
       results.failed += validFiles.length - results.failed;
@@ -305,27 +430,21 @@ export class TrackSender {
       if (tempZipPath) await fs.unlink(tempZipPath).catch(e => this.logger.warn('删除临时压缩包失败: %s', e.message));
     }
   }
-
-  // Zip 模式：每个文件一个压缩包
   private async handleMultipleZips(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     await session.send(`准备单独压缩 ${validFiles.length} 个文件...`);
     await this._ensureTempDir();
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
-
     for (const { index, file } of validFiles) {
       let tempZipPath: string;
       try {
         const filePathOnDisk = await this._getCachedFilePathOrDownload(file, rjCode);
         const baseFilename = this.config.prependRjCodeZip ? `${rjCode} ${file.title}` : file.title;
         const zipFilename = getZipFilename(baseFilename);
-
         const { archive, finishPromise, tempPath } = this.createZipArchiveStream(zipFilename);
         tempZipPath = tempPath;
-
         archive.file(filePathOnDisk, { name: getSafeFilename(file.title) });
         await archive.finalize();
         await finishPromise;
-
         await session.send(h('file', { src: pathToFileURL(tempZipPath).href, title: zipFilename }));
         results.success++;
       } catch (error) {
@@ -338,38 +457,27 @@ export class TrackSender {
       }
     }
   }
-
-  // --- 底层与辅助方法 ---
-
-  // 创建一个压缩文件流，支持加密
   private createZipArchiveStream(outputZipName: string): { archive: archiver.Archiver, finishPromise: Promise<void>, tempPath: string } {
     const tempZipPath = resolve(this.tempDir, outputZipName);
     const output = createWriteStream(tempZipPath);
     const isEncrypted = this.config.usePassword && this.config.password && this.config.password.length > 0;
     const format = isEncrypted ? 'zip-encrypted' : 'zip';
-
     const archiveOptions: archiver.ArchiverOptions & { encryptionMethod?: string; password?: string } = {
       zlib: { level: this.config.zipCompressionLevel }
     };
-
     if (isEncrypted) {
       archiveOptions.encryptionMethod = 'aes256';
       archiveOptions.password = this.config.password;
     }
-
     const archive = archiver(format as archiver.Format, archiveOptions);
     archive.pipe(output);
-
     const finishPromise = new Promise<void>((resolve, reject) => {
       output.on("close", resolve);
       archive.on("warning", (err) => this.logger.warn('Archiver warning: %o', err));
       archive.on("error", reject);
     });
-
     return { archive, finishPromise, tempPath: tempZipPath };
   }
-
-  // 带并发控制的文件下载调度器
   private async downloadFilesWithConcurrency<T, R>(
     items: T[],
     worker: (item: T) => Promise<R>
@@ -377,7 +485,6 @@ export class TrackSender {
     const results: R[] = [];
     const queue = [...items];
     const concurrency = this.config.downloadConcurrency;
-
     const runWorker = async () => {
       while (queue.length > 0) {
         const item = queue.shift();
@@ -387,13 +494,10 @@ export class TrackSender {
         }
       }
     };
-
     const workers = Array(concurrency).fill(null).map(() => runWorker());
     await Promise.all(workers);
     return results;
   }
-
-  // 下载单个文件，包含重试和错误处理逻辑
   private async _downloadFileWithRetry(url: string, title: string, outputPath: string): Promise<void> {
     let lastError: Error | null = null;
     for (let i = 0; i < this.config.maxRetries; i++) {
@@ -403,9 +507,7 @@ export class TrackSender {
           responseType: 'arraybuffer',
           timeout: this.config.downloadTimeout * 1000
         });
-
         if (!arrayBuffer || arrayBuffer.byteLength < MIN_FILE_SIZE_BYTES) throw new Error('文件为空或过小');
-
         await fs.writeFile(outputPath, Buffer.from(arrayBuffer));
         return;
       } catch (error) {
@@ -420,19 +522,14 @@ export class TrackSender {
     this.logger.error(`下载文件 "%s" 在 %d 次尝试后彻底失败。`, title, this.config.maxRetries);
     throw lastError;
   }
-  
-  // 获取文件 Buffer，优先从缓存读取
   private async _getCachedFileOrDownload(file: ProcessedFile, rjCode: string): Promise<Buffer> {
     const filePath = await this._getCachedFilePathOrDownload(file, rjCode);
     return fs.readFile(filePath);
   }
-
-  // 获取文件在本地的缓存路径，如果不存在则下载
   private async _getCachedFilePathOrDownload(file: ProcessedFile, rjCode: string): Promise<string> {
     const safeFilename = getSafeFilename(file.title);
     const cacheDir = resolve(this.tempDir, rjCode);
     const cachePath = resolve(cacheDir, safeFilename);
-
     if (this.config.cache.enableCache) {
       try {
         const stats = await fs.stat(cachePath);
@@ -447,14 +544,11 @@ export class TrackSender {
         }
       }
     }
-
     this.logger.info(`[Cache] MISS for file path: ${file.title}, downloading...`);
     await this._ensureTempDir(cacheDir);
     await this._downloadFileWithRetry(file.url, file.title, cachePath);
     return cachePath;
   }
-
-  // 确保临时目录存在
   private async _ensureTempDir(path: string = this.tempDir): Promise<void> {
     try {
       await fs.mkdir(path, { recursive: true });
@@ -464,5 +558,3 @@ export class TrackSender {
     }
   }
 }
-
-// --- END OF FILE src/services/sender.ts ---

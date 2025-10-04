@@ -1,5 +1,3 @@
-// --- START OF FILE src/common/utils.ts ---
-
 import { TrackItem, DisplayItem, ProcessedFile } from './types'
 
 export function formatRjCode(rjInput: string): string | null {
@@ -67,6 +65,7 @@ export function parseTrackIndices(args: string[]): number[] {
 export const getSafeFilename = (name: string) => name.replace(/[\/\\?%*:|"<>]/g, '_');
 export const getZipFilename = (baseName: string): string => `${baseName.replace(/[\/\\?%*:|"<>]/g, '_')}.zip`;
 
+// --- V5 优化：精简数据处理 ---
 export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem[], processedFiles: ProcessedFile[] } {
   const displayItems: DisplayItem[] = [];
   const processedFiles: ProcessedFile[] = [];
@@ -88,7 +87,6 @@ export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem
     return 'unknown';
   }
 
-  // 定义文件和文件夹的排序逻辑
   const sorter = (a: TrackItem, b: TrackItem) => {
     const typePriority = {
       audio: 0, video: 1, image: 2, subtitle: 3, doc: 4, unknown: 5, folder: 6
@@ -103,10 +101,9 @@ export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem
     return a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' });
   };
 
-  // 递归遍历文件树
   function traverse(item: TrackItem, depth: number, currentPath: string) {
     const fileType = getFileType(item);
-    const isDownloadable = !!item.mediaDownloadUrl;
+    const isDownloadable = !!item.mediaDownloadUrl; // 只关心 downloadUrl
     const safeTitle = getSafeFilename(item.title);
     const newPath = currentPath ? `${currentPath}/${safeTitle}` : safeTitle;
 
@@ -125,10 +122,9 @@ export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem
       processedFiles.push({
         title: item.title,
         path: newPath,
-        url: item.mediaDownloadUrl,
+        url: item.mediaDownloadUrl, // 只保留这一个 URL
         type: fileType,
-        duration: item.duration,
-        size: item.size,
+        // duration 和 size 不再需要
       });
     }
 
@@ -143,5 +139,3 @@ export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem
 
   return { displayItems, processedFiles };
 }
-
-// --- END OF FILE src/common/utils.ts ---
