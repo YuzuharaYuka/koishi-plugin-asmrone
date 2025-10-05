@@ -8,22 +8,23 @@
 
 ## 功能
 
-- **强大的搜索**: 支持关键词、标签、声优、社团等多种筛选条件，并可按发售日、评分、销量等多种方式排序。
+- **搜索功能**: 支持关键词、标签、声优、社团等多种筛选条件，并可按发售日、评分、销量等多种方式排序。
 - **结果展示**: 支持两种模式展示搜索结果和作品详情：
-  - **图片菜单**: (需 `puppeteer`) 将内容渲染为图片发送，美观且能规避平台风控。
+  - **图片菜单**: (需 `puppeteer` 服务) 将内容渲染为图片菜单发送，直观且能有效规避平台风控。
   - **文本消息**: 以纯文本或合并转发的形式发送。
-- **多种收听方式**: 支持多种方式发送音轨：
+- **收听方式**: 支持多种方式发送音轨：
   - **`card`**: 音乐卡片 (仅部分平台支持，如 OneBot)。
   - **`file`**: 逐个发送原始音频文件。
   - **`zip`**: 将多个音轨打包为 ZIP 压缩包发送，支持加密和自定义压缩级别。
+  - **`player`**: 发送一个在线播放器链接，支持播放列表。
   - **`link`**: 发送音轨的直接下载链接。
-  - **`player`**: 发送一个在线播放器链接。
   - **`voice`**: 以语音形式发送 (仅部分平台支持，需配置 FFmpeg)。
-- **交互式操作**:
+- **交互操作**:
   - 列表指令后可回复序号选择，[F]下一页，[P]上一页。
   - 详情页可回复[B]返回列表。
   - 所有交互均可回复[N/取消]随时中断。
 - **权限管理**: 支持白名单和黑名单模式，可精细控制插件可用性。
+- **可自定义**: 支持自定义图片菜单外观、文件命名规则、缓存策略等。
 
 ## 安装
 
@@ -102,7 +103,7 @@
 
 3. **在交互中指定发送方式**:
 
-   > 使用 `听音声 RJ00123456` 后，可通过回复 `2 4-6 player` 来获取第 2、4、5、6 轨，并以在线播放器形式收听。
+   > 使用 `听音声 RJ00123456` 后，可通过回复 `2 4-6 card` 来获取第 2、4、5、6 轨，并以音乐卡片收听。
 
 ## 配置项
 
@@ -111,13 +112,13 @@
 | 配置项             | 类型      | 默认值                          | 说明                                           |
 | :------------------- | :-------- | :------------------------------ | :--------------------------------------------- |
 | `apiBaseUrl`         | `string`  | `https://api.asmr-200.com/api`  | 音声数据 API 地址。                            |
-| `useForward`         | `boolean` | `false`                         | (文本模式) 启用合并转发发送长消息。            |
-| `showSearchImage`    | `boolean` | `false`                         | (文本模式) 搜索结果中显示封面图 (有风控风险)。 |
+| `defaultSendMode`    | `string`  | `player`                        | 默认音轨发送方式。                             |
 | `useImageMenu`       | `boolean` | `true`                          | 启用图片菜单 (需 `puppeteer`)。                |
+| `useForward`         | `boolean` | `true`                          | (文本模式) 启用合并转发发送长消息，减少刷屏。  |
+| `showSearchImage`    | `boolean` | `false`                         | (文本模式) 在搜索结果的文本消息中也显示封面图。|
 | `showLinks`          | `boolean` | `false`                         | 在详情中显示 asmr.one/DLsite 链接。            |
 | `pageSize`           | `number`  | `10`                            | 每页结果数量 (1-40)。                          |
 | `interactionTimeout` | `number`  | `60`                            | 交互操作超时时间 (秒)。                        |
-| `maxRetries`         | `number`  | `3`                             | API请求及文件下载失败时的最大重试次数。        |
 
 ### 权限设置
 
@@ -131,11 +132,15 @@
 
 | 配置项                    | 类型     | 默认值   | 说明                                                         |
 | :------------------------ | :------- | :------- | :----------------------------------------------------------- |
-| `defaultSendMode`         | `string` | `file`   | 默认音轨发送方式: `card`, `file`, `zip`, `link`, `player`, `voice`。 |
+| `downloadConcurrency`     | `number` | `3`      | 同时下载文件的最大数量。                                     |
+| `downloadTimeout`         | `number` | `300`    | 单个文件下载的超时时间 (秒)。                                |
+| `maxRetries`              | `number` | `3`      | API请求及文件下载失败时的最大重试次数。                      |
 | `cardModeNonAudioAction`  | `string` | `skip`   | Card模式下对非音频文件的操作: `skip` (跳过) 或 `fallbackToFile` (转为file模式发送)。 |
 | `voiceModeNonAudioAction` | `string` | `skip`   | Voice模式下对非音频文件的操作: `skip` (跳过) 或 `fallbackToFile` (转为file模式发送)。 |
-| `downloadTimeout`         | `number` | `300`    | 单文件下载超时 (秒)。                                        |
-| `downloadConcurrency`     | `number` | `3`      | 同时下载文件的最大数量。                                     |
+| `zipMode`                 | `string` | `single` | 多文件压缩方式: `single` (合并为一包) 或 `multiple` (每轨一包)。 |
+| `zipCompressionLevel`     | `number` | `1`      | ZIP 压缩级别 (0不压缩, 1最快, 9最高)。                       |
+| `usePassword`             | `boolean`| `false`  | 是否为生成的 ZIP 压缩包设置密码。                          |
+| `password`                | `string` | -        | 压缩包密码 (需先启用 `usePassword`)。                      |
 
 ### 命名规则设置
 
@@ -144,35 +149,38 @@
 | `prependRjCodeCard`| `boolean` | `false` | Card 标题添加 RJ 号。       |
 | `prependRjCodeFile`| `boolean` | `true`  | File 文件名添加 RJ 号。     |
 | `prependRjCodeZip` | `boolean` | `true`  | Zip 包名/文件夹添加 RJ 号。 |
-| `prependRjCodeLink`| `boolean` | `true` | Link 模式标题添加 RJ 号。 |
-| `prependRjCodePlayer` | `boolean` | `true`  | Player 模式标题添加 RJ 号。 |
+| `prependRjCodeLink`| `boolean` | `true`  | Link 模式标题添加 RJ 号。   |
 
 ### 在线播放器设置
 
-| 配置项 | 类型 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- |
+| 配置项          | 类型     | 默认值                                                 | 说明                       |
+| :-------------- | :------- | :----------------------------------------------------- | :------------------------- |
 | `playerBaseUrl` | `string` | `https://yuzuharayuka.github.io/amsrone-audio-player/` | 在线播放器页面的基础 URL。 |
-
-### 压缩包设置
-
-| 配置项                | 类型     | 默认值   | 说明                                               |
-| :-------------------- | :------- | :------- | :------------------------------------------------- |
-| `zipMode`             | `string` | `single` | 多文件压缩方式: `single` (合并为一包) 或 `multiple` (每轨一包)。 |
-| `zipCompressionLevel` | `number` | `1`      | ZIP 压缩级别 (0不压缩, 1最快, 9最高)。             |
-| `usePassword`         | `boolean`| `false`  | Zip 是否加密。                                     |
-| `password`            | `string` | `""`     | 压缩包密码 (需先启用 `usePassword`)。              |
 
 ### 缓存设置
 
-| 配置项 | 类型 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `cache.enableCache`| `boolean`| `true` | 启用音频文件缓存，避免重复下载。 |
-| `cache.cacheMaxAge`| `number`| `24` | 缓存文件保留时间 (小时)，0 表示永久。 |
-| `renderCache.enableRenderCache` | `boolean` | `true` | 启用图片菜单的渲染缓存。 |
-| `renderCache.renderCacheMaxAge` | `number` | `6` | 图片缓存保留时间 (小时)，0 表示永久。 |
+| 配置项                | 类型      | 默认值 | 说明                                                         |
+| :-------------------- | :-------- | :----- | :----------------------------------------------------------- |
+| `cache.enableCache`       | `boolean` | `true` | 启用音频文件缓存，避免重复下载。                             |
+| `cache.cacheMaxAge`       | `number`  | `1`    | 音频缓存文件保留时间 (小时)，0 表示永久。                   |
+| `cache.enableRenderCache` | `boolean` | `true` | 启用图片菜单的渲染缓存。                                     |
+| `cache.renderCacheMaxAge` | `number`  | `1`    | 图片缓存保留时间 (小时)，0 表示永久。                       |
+
+### 图片菜单与渲染
+
+| 配置项                  | 类型      | 默认值    | 说明                                                         |
+| :---------------------- | :-------- | :-------- | :----------------------------------------------------------- |
+| `imageRenderScale`      | `number`  | `1`       | 图片渲染质量 (缩放比例)。越高越清晰，但生成越慢，图片越大。  |
+| `enableAntiCensorship`  | `boolean` | `true`    | 图片抗风控处理，会略微增加生成耗时。                         |
+| `imageMenu`             | `object`  | -         | (折叠项) 用于自定义图片菜单的各种颜色，如背景、文本、标题等。 |
 
 ### 调试设置
 
 | 配置项  | 类型      | 默认值  | 说明                                   |
 | :------ | :-------- | :------ | :------------------------------------- |
 | `debug` | `boolean` | `false` | 开启Debug模式 (在控制台输出详细API日志)。 |
+
+## 致谢
+
+- **[asmr.one](https://asmr.one)**: 提供强大、及时的 API 服务。
+- **[Koishi](https://koishi.chat/)**: 插件所依赖的机器人框架。
