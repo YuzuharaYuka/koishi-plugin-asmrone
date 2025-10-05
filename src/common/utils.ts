@@ -30,7 +30,6 @@ export function formatTrackDuration(seconds: number): string {
   const s = Math.round(seconds % 60);
   const pad = (n: number) => n.toString().padStart(2, '0');
   if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
-  // 修正：确保分钟在无小时的情况下也能正确补零
   return `${pad(m)}:${pad(s)}`;
 }
 
@@ -68,16 +67,15 @@ export function parseTrackIndices(args: string[]): number[] {
 export const getSafeFilename = (name: string) => name.replace(/[\/\\?%*:|"<>]/g, '_');
 export const getZipFilename = (baseName: string): string => `${baseName.replace(/[\/\\?%*:|"<>]/g, '_')}.zip`;
 
-// --- V6 优化：重构文件处理逻辑 ---
+// --- V7 优化：修复文件排序逻辑 ---
 export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem[], processedFiles: ProcessedFile[] } {
   const displayItems: DisplayItem[] = [];
   const processedFiles: ProcessedFile[] = [];
   let fileCounter = 0;
 
-  // 内部函数，用于根据API类型和文件名扩展名确定统一的文件类型
   function getFileType(item: TrackItem): DisplayItem['type'] {
     if (item.type === 'folder') return 'folder';
-    if (item.mediaDownloadUrl) { // 优先判断是否可下载
+    if (item.mediaDownloadUrl) {
       const title = item.title.toLowerCase();
       if (item.type === 'audio' || /\.(mp3|wav|flac|m4a|ogg)$/.test(title)) return 'audio';
       if (item.type === 'image' || /\.(jpg|jpeg|png|gif|webp)$/.test(title)) return 'image';
@@ -85,25 +83,23 @@ export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem
       if (/\.(txt|srt|ass|vtt|lrc)$/.test(title)) return 'subtitle';
       if (/\.(pdf|doc|docx)$/.test(title)) return 'doc';
     }
-    // 对于不可下载的文件夹或未知类型
     if (item.type === 'folder') return 'folder';
     return 'unknown';
   }
 
-  // 排序比较函数：优先按类型排序，然后按文件名进行自然排序
   const sorter = (a: TrackItem, b: TrackItem) => {
     const typePriority = {
-      folder: 0, audio: 1, video: 2, image: 3, subtitle: 4, doc: 5, unknown: 6
+      audio: 1, video: 2, image: 3, subtitle: 4, doc: 5, unknown: 6, folder: 7
     };
     const typeA = getFileType(a);
     const typeB = getFileType(b);
-    const priorityA = typePriority[typeA];
-    const priorityB = typePriority[typeB];
+    // 将文件夹排在文件之后
+    const priorityA = typeA === 'folder' ? typePriority.folder : (typePriority[typeA] || typePriority.unknown);
+    const priorityB = typeB === 'folder' ? typePriority.folder : (typePriority[typeB] || typePriority.unknown);
 
     if (priorityA !== priorityB) {
       return priorityA - priorityB;
     }
-    // 使用 localeCompare 进行自然排序，例如 'track 2' 会排在 'track 10' 之前
     return a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' });
   };
 
@@ -134,13 +130,13 @@ export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem
     }
 
     if (item.type === 'folder' && item.children?.length > 0) {
-      // 在遍历子项前先排序
+      // 修复：排序应该在每个子目录级别进行，而不是全局
       item.children.sort(sorter).forEach(child => traverse(child, depth + 1, newPath));
     }
   }
 
-  // 根级别排序
-  items.sort(sorter).forEach(item => traverse(item, 0, ''));
+  // 修复：移除全局排序，从根级别开始遍历
+  items.forEach(item => traverse(item, 0, ''));
 
   return { displayItems, processedFiles };
 }
