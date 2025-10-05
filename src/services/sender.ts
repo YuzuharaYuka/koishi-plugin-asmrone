@@ -1,3 +1,5 @@
+// --- START OF FILE src/services/sender.ts ---
+
 import { Context, Session, h, Logger } from 'koishi'
 import { resolve } from 'path'
 import { promises as fs, createWriteStream } from 'fs'
@@ -9,28 +11,24 @@ import { Config } from '../config'
 import { SendMode, ZipMode, CardModeNonAudioAction, VoiceModeNonAudioAction, USER_AGENT, RETRY_DELAY_MS, MIN_FILE_SIZE_BYTES, LINK_SEND_DELAY_MS, ONEBOT_MUSIC_CARD_TYPE } from '../common/constants'
 import { getSafeFilename, getZipFilename } from '../common/utils'
 
-// --- V9 Payload 扩充字典 ---
+// --- V10 Payload 扩充字典 ---
 const URL_DICTIONARY = {
   // d0-d9: API & Cover Domains
   'd0': 'https://api.asmr-200.com/api/',
   'd1': 'https://api.asmr.one/api/',
   'd2': 'https://api.asmr-100.com/api/',
   'd3': 'https://api.asmr-300.com/api/',
-
   // a0-a9: Audio CDN Domains
   'a0': 'https://raw.kiko-play-niptan.one/',
   'a1': 'https://fast.kiko-play-niptan.one/',
   'a2': 'https://large.kiko-play-niptan.one/',
-
   // p0-p9: Common Paths
   'p0': 'cover/',
   'p1': 'media/download/',
   'p2': 'media/stream/',
 };
-const REVERSE_URL_DICTIONARY = new Map<string, string>();
-Object.entries(URL_DICTIONARY).forEach(([key, value]) => {
-  REVERSE_URL_DICTIONARY.set(value, key);
-});
+// 预处理字典，按前缀长度降序排序，以便优先匹配最长的前缀
+const DICTIONARY_ENTRIES = Object.entries(URL_DICTIONARY).sort((a, b) => b[1].length - a[1].length);
 
 interface SendResultTracker {
   success: number;
@@ -40,15 +38,45 @@ interface SendResultTracker {
 
 export class TrackSender {
   private logger: Logger
+  // 修正：将 User--Agent 改为标准的 User-Agent
   private requestOptions = {
-    headers: { 'User--Agent': USER_AGENT },
+    headers: { 'User-Agent': USER_AGENT },
   }
 
   constructor(private ctx: Context, private config: Config, private tempDir: string) {
     this.logger = ctx.logger('asmrone')
   }
 
-  // --- V9 优化版 ---
+  // 辅助函数：压缩单个 URL (优化版)
+  private _compressUrl(url: string): string | (string | (string | string[])[])[] {
+    // 寻找域名+路径的最佳匹配
+    for (const [domainKey, domainPrefix] of DICTIONARY_ENTRIES.filter(([k]) => k.startsWith('d') || k.startsWith('a'))) {
+      if (url.startsWith(domainPrefix)) {
+        const remainingPath = url.substring(domainPrefix.length);
+        for (const [pathKey, pathPrefix] of DICTIONARY_ENTRIES.filter(([k]) => k.startsWith('p'))) {
+          if (remainingPath.startsWith(pathPrefix)) {
+            // 匹配到 域名+路径
+            return [[domainKey, pathKey], remainingPath.substring(pathPrefix.length)];
+          }
+        }
+        // 只匹配到域名
+        return [domainKey, remainingPath];
+      }
+    }
+    // 未找到任何匹配，返回原始URL
+    return url;
+  }
+
+  /**
+   * 生成并发送在线播放器链接
+   * V10 Payload 结构:
+   * {
+   *   w: string,                  // Work Title
+   *   r: string,                  // RJ Code (36进制压缩)
+   *   c: string | [string, any],  // Cover URL (压缩后)
+   *   t: [string | [string, any], string][] // Tracks: [[compressedUrl, trackTitle], ...]
+   * }
+   */
   private async _sendAsPlayer(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     const playerBaseUrl = this.config.player?.playerBaseUrl;
     if (!playerBaseUrl || !playerBaseUrl.startsWith('http')) {
@@ -60,104 +88,53 @@ export class TrackSender {
 
     const audioFiles = validFiles.filter(vf => vf.file.type === 'audio');
     if (audioFiles.length === 0) {
-        await session.send('选择的文件中没有可播放的音频。');
-        return;
+      await session.send('选择的文件中没有可播放的音频。');
+      return;
     }
 
-    // 1. RJ号转为36进制
+    // 1. RJ号转为36进制以缩短长度
     const rjNum = parseInt(String(workInfo.id).replace(/^RJ/i, ''), 10);
     const compressedRj = rjNum.toString(36);
 
-    // 2. 封面URL分段字典化
-    let coverPayload: string | (string | (string | string[])[])[];
-    const coverUrl = workInfo.mainCoverUrl;
-    let coverBaseFound = false;
-    for (const [domainKey, domainPrefix] of Object.entries(URL_DICTIONARY)) {
-        if (!domainKey.startsWith('d')) continue; // 只匹配域名
-        if (coverUrl.startsWith(domainPrefix)) {
-            const restOfUrl = coverUrl.substring(domainPrefix.length);
-            for (const [pathKey, pathPrefix] of Object.entries(URL_DICTIONARY)) {
-                if (!pathKey.startsWith('p')) continue; // 只匹配路径
-                if (restOfUrl.startsWith(pathPrefix)) {
-                    coverPayload = [[domainKey, pathKey], restOfUrl.substring(pathPrefix.length)];
-                    coverBaseFound = true;
-                    break;
-                }
-            }
-        }
-        if (coverBaseFound) break;
-    }
-    if (!coverBaseFound) {
-      coverPayload = coverUrl;
-    }
+    // 2. 压缩封面和音轨URL
+    const compressedCover = this._compressUrl(workInfo.mainCoverUrl);
+    const tracks = audioFiles.map(({ file }) => [this._compressUrl(file.url), file.title]);
 
-    // 3. 音轨URL分段字典化 + 动态提取
-    const allAudioUrls = audioFiles.map(af => af.file.url);
-    let commonBase = this._findCommonBase(allAudioUrls);
-    let basePayload: string | (string | (string | string[])[])[];
-
-    let baseReplaced = false;
-    for (const [domainKey, domainPrefix] of Object.entries(URL_DICTIONARY)) {
-        if (!domainKey.startsWith('a') && !domainKey.startsWith('d')) continue; // 音频可以来自 a 或 d 类的域名
-        if (commonBase.startsWith(domainPrefix)) {
-            const restOfBase = commonBase.substring(domainPrefix.length);
-            for (const [pathKey, pathPrefix] of Object.entries(URL_DICTIONARY)) {
-                if (!pathKey.startsWith('p')) continue;
-                if (restOfBase.startsWith(pathPrefix)) {
-                    basePayload = [[domainKey, pathKey], restOfBase.substring(pathPrefix.length)];
-                    baseReplaced = true;
-                    break;
-                }
-            }
-        }
-        if (baseReplaced) break;
-    }
-    if (!baseReplaced) {
-        basePayload = commonBase;
-    }
-    
-    const tracks = audioFiles.map(({ file }) => {
-      const relativePath = commonBase ? file.url.substring(commonBase.length) : file.url;
-      return [relativePath, file.title];
-    });
-
-    // 4. 构建 V9 Payload
+    // 3. 构建 V10 Payload
     const payload = {
-      b: basePayload,
       w: workInfo.title,
       r: compressedRj,
-      c: coverPayload,
+      c: compressedCover,
       t: tracks,
     };
-    
-    // 5. 压缩与编码
+
+    // 4. 压缩与编码
     const jsonString = JSON.stringify(payload);
     const compressed = pako.deflate(jsonString, { level: 9 });
     const base64Payload = Buffer.from(compressed).toString('base64url');
     const finalPlayerUrl = `${playerBaseUrl.endsWith('/') ? playerBaseUrl : playerBaseUrl + '/'}?p=${base64Payload}`;
-    
-    // 6. 发送消息
+
+    // 5. 发送消息
     try {
-        const message = audioFiles.length > 1
-            ? `已为您生成包含 ${audioFiles.length} 个音轨的播放列表，请点击下方链接收听：`
-            : `请点击下方链接在线收听：`;
-        await session.send(message);
-        if (this.config.useForward && session.platform === 'onebot') {
-            const forwardMessage = h('message', { userId: session.bot.selfId, nickname: workInfo.title }, finalPlayerUrl);
-            await session.send(h('figure', forwardMessage));
-        } else {
-            await session.send(finalPlayerUrl);
-        }
-        results.success += audioFiles.length;
+      const message = audioFiles.length > 1
+        ? `已为您生成包含 ${audioFiles.length} 个音轨的播放列表，请点击下方链接收听：`
+        : `请点击下方链接在线收听：`;
+      await session.send(message);
+      
+      const linkMessage = this.config.useForward && session.platform === 'onebot'
+        ? h('figure', h('message', { userId: session.bot.selfId, nickname: workInfo.title }, finalPlayerUrl))
+        : finalPlayerUrl;
+
+      await session.send(linkMessage);
+      results.success += audioFiles.length;
     } catch (error) {
-        this.logger.error('发送播放链接失败: %o', error);
-        results.failed += audioFiles.length;
-        results.reasons.add('发送失败');
-        await session.send(`发送播放链接失败。`);
+      this.logger.error('发送播放链接失败: %o', error);
+      results.failed += audioFiles.length;
+      results.reasons.add('发送失败');
+      await session.send(`发送播放链接失败。`);
     }
   }
-  
-  // ( ... 其余所有方法都保持不变, 为简洁省略, 请保留你文件中的原有实现 ... )
+
   async processAndSendTracks(indices: number[], allFiles: ProcessedFile[], workInfo: WorkInfoResponse, session: Session, mode: SendMode) {
     const validFiles: ValidFile[] = indices
       .map(i => ({ index: i, file: allFiles[i - 1] }))
@@ -173,7 +150,7 @@ export class TrackSender {
 
     if (mode === SendMode.PLAYER) {
       await this._sendAsPlayer(validFiles, workInfo, session, results);
-    } 
+    }
     else if (mode === SendMode.CARD) {
       const audioFiles = validFiles.filter(vf => vf.file.type === 'audio');
       const nonAudioFiles = validFiles.filter(vf => vf.file.type !== 'audio');
@@ -225,16 +202,16 @@ export class TrackSender {
   private _findCommonBase(urls: string[]): string {
     if (!urls || urls.length === 0) return '';
     if (urls.length === 1) {
-        const url = urls[0];
-        const lastSlash = url.lastIndexOf('/');
-        return lastSlash > -1 ? url.substring(0, lastSlash + 1) : '';
+      const url = urls[0];
+      const lastSlash = url.lastIndexOf('/');
+      return lastSlash > -1 ? url.substring(0, lastSlash + 1) : '';
     }
     const sortedUrls = [...urls].sort();
     const first = sortedUrls[0];
     const last = sortedUrls[sortedUrls.length - 1];
     let i = 0;
     while (i < first.length && first[i] === last[i]) {
-        i++;
+      i++;
     }
     const commonPrefix = first.substring(0, i);
     const lastSlash = commonPrefix.lastIndexOf('/');
@@ -273,7 +250,7 @@ export class TrackSender {
   private async _sendAsLink(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     await session.send(`正在发送 ${validFiles.length} 个下载链接...`);
     const rjCode = `RJ${String(workInfo.id).padStart(8, '0')}`;
-    if (session.platform === 'onebot' && typeof session.send === 'function') {
+    if (session.platform === 'onebot' && typeof session.send === 'function' && this.config.useForward) {
       try {
         const forwardMessages = validFiles.map(({ index, file }) => {
           const title = this.config.prependRjCodeLink ? `${rjCode} ${file.title}` : file.title;
@@ -558,3 +535,4 @@ export class TrackSender {
     }
   }
 }
+// --- END OF FILE src/services/sender.ts ---

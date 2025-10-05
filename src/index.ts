@@ -71,69 +71,43 @@ export const usage = `
 *	如果遇到问题或有建议，反馈请通过[issue](https://github.com/YuzuharaYuka/koishi-plugin-asmrone/issues)。
 `
 
-// 定期清理过期的音频缓存文件
-async function cleanupAudioCache(logger: Logger, audioTempDir: string, maxAgeHours: number) {
+// 优化：通用的缓存目录清理函数
+async function cleanupCacheDirectory(logger: Logger, dirPath: string, maxAgeHours: number, label: string, recursive: boolean = false) {
   if (maxAgeHours <= 0) return;
   const maxAgeMs = maxAgeHours * 3600 * 1000;
   const now = Date.now();
   let cleanedCount = 0;
 
-  try {
-    const rjFolders = await fs.readdir(audioTempDir, { withFileTypes: true });
-    for (const rjFolder of rjFolders) {
-      if (rjFolder.isDirectory()) {
-        const folderPath = join(audioTempDir, rjFolder.name);
-        try {
-          const files = await fs.readdir(folderPath);
-          for (const file of files) {
-            const filePath = join(folderPath, file);
-            try {
-              const stats = await fs.stat(filePath);
-              if (now - stats.mtimeMs > maxAgeMs) {
-                await fs.unlink(filePath);
-                cleanedCount++;
-              }
-            } catch (err) { /* 忽略单个文件处理失败 */ }
+  async function processDirectory(currentPath: string) {
+    try {
+      const entries = await fs.readdir(currentPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = join(currentPath, entry.name);
+        if (entry.isDirectory() && recursive) {
+          await processDirectory(fullPath);
+        } else if (entry.isFile()) {
+          try {
+            const stats = await fs.stat(fullPath);
+            if (now - stats.mtimeMs > maxAgeMs) {
+              await fs.unlink(fullPath);
+              cleanedCount++;
+            }
+          } catch (err) {
+            // 忽略单个文件处理失败
           }
-        } catch (err) { /* 忽略单个RJ目录处理失败 */ }
-      }
-    }
-    if (cleanedCount > 0) {
-      logger.info(`[Audio Cache] Cleaned up ${cleanedCount} expired audio cache file(s).`);
-    }
-  } catch (error) {
-    if (error.code !== 'ENOENT') logger.error(`[Audio Cache] Error during cleanup: ${error.message}`);
-  }
-}
-
-// 定期清理过期的渲染图片缓存
-async function cleanupRenderCache(logger: Logger, renderCacheDir: string, maxAgeHours: number) {
-  if (maxAgeHours <= 0) return;
-  const maxAgeMs = maxAgeHours * 3600 * 1000;
-  const now = Date.now();
-  let cleanedCount = 0;
-
-  try {
-    const files = await fs.readdir(renderCacheDir);
-    for (const file of files) {
-      const filePath = join(renderCacheDir, file);
-      try {
-        const stats = await fs.stat(filePath);
-        if (now - stats.mtimeMs > maxAgeMs) {
-          await fs.unlink(filePath);
-          cleanedCount++;
         }
-      } catch (err) {
-        logger.warn(`Failed to process render cache file ${filePath}: ${err.message}`);
+      }
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        logger.error(`[${label} Cache] Error processing directory ${currentPath}: ${err.message}`);
       }
     }
-    if (cleanedCount > 0) {
-      logger.info(`[Render Cache] Cleaned up ${cleanedCount} expired image(s).`);
-    }
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      logger.error(`[Render Cache] Error during cleanup: ${error.message}`);
-    }
+  }
+
+  await processDirectory(dirPath);
+
+  if (cleanedCount > 0) {
+    logger.info(`[${label} Cache] Cleaned up ${cleanedCount} expired cache file(s).`);
   }
 }
 
@@ -142,6 +116,7 @@ export function apply(ctx: Context, config: Config) {
   const logger = ctx.logger('asmrone');
   const tempDir = resolve(ctx.baseDir, 'data', 'temp', 'asmrone');
   const renderCacheDir = resolve(tempDir, 'render-cache');
+  const audioCacheDir = tempDir; // 音频缓存直接使用 tempDir
 
   // 实例化所有服务
   const api = new AsmrApi(ctx, config);
@@ -158,14 +133,18 @@ export function apply(ctx: Context, config: Config) {
     } catch (error) {
       logger.error('创建临时目录失败: %o', error);
     }
+    
     // 启动定时缓存清理任务
     if (config.cache.enableCache) {
-      cleanupAudioCache(logger, tempDir, config.cache.cacheMaxAge);
-      ctx.setInterval(() => cleanupAudioCache(logger, tempDir, config.cache.cacheMaxAge), Time.hour);
+      const audioCleanup = () => cleanupCacheDirectory(logger, audioCacheDir, config.cache.cacheMaxAge, 'Audio', true);
+      audioCleanup();
+      ctx.setInterval(audioCleanup, Time.hour);
     }
-    if (config.renderCache.enableRenderCache) {
-      cleanupRenderCache(logger, renderCacheDir, config.renderCache.renderCacheMaxAge);
-      ctx.setInterval(() => cleanupRenderCache(logger, renderCacheDir, config.renderCache.renderCacheMaxAge), Time.hour);
+    
+    if (config.cache.enableRenderCache) {
+      const renderCleanup = () => cleanupCacheDirectory(logger, renderCacheDir, config.cache.renderCacheMaxAge, 'Render');
+      renderCleanup();
+      ctx.setInterval(renderCleanup, Time.hour);
     }
   });
 

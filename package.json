@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-asmrone",
   "description": "利用 asmr.one API，在聊天平台中搜索、获取详情并收听音声作品。",
-  "version": "1.7.0",
+  "version": "1.7.2",
   "homepage": "https://github.com/YuzuharaYuka/koishi-plugin-asmrone",
   "repository": {
     "type": "git",
@@ -16,8 +16,8 @@
   "dependencies": {
     "archiver": "^7.0.1",
     "archiver-zip-encrypted": "^2.0.0",
-    "pureimage": "^0.4.18",
-    "pako": "^2.1.0"
+    "pako": "^2.1.0",
+    "pureimage": "^0.4.18"
   },
   "keywords": [
     "chatbot",

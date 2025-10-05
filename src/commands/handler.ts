@@ -177,7 +177,7 @@ export class CommandHandler {
         return;
       }
 
-      await this.sendSearchTextResult(session, data, page);
+      await this.sendSearchResult(session, data, page);
 
       await session.send(`请在 ${this.config.interactionTimeout} 秒内回复序号选择作品，[F]下一页，[P]上一页，[N]取消。`);
 
@@ -350,6 +350,7 @@ export class CommandHandler {
     await this.sendWorkInfoAsText(session, workInfo, displayItems, rjCode);
   }
 
+  // 优化：增强图片发送的可靠性
   private async sendWorkInfoAsText(session: Session, workInfo: BaseWork, displayItems: DisplayItem[], rjCode: string) {
     const infoBlockArray = [
       `【${rjCode}】`, `标题: ${h.escape(workInfo.title)}`, `社团: 🏢 ${h.escape(workInfo.name)}`,
@@ -372,20 +373,21 @@ export class CommandHandler {
       return `${prefix}${indexStr}${icon} ${h.escape(item.title)}${metaStr}`;
     }).join('\n');
 
+    const imageUri = await this.api.downloadImageAsDataUri(workInfo.mainCoverUrl);
+    const imageElement = imageUri ? h.image(imageUri) : h('p', '封面加载失败');
+
     if (this.config.useForward && session.platform === 'onebot') {
-      const imageUri = await this.api.downloadImageAsDataUri(workInfo.mainCoverUrl);
-      const imageElement = imageUri ? h.image(imageUri) : h('p', '封面加载失败');
       await session.send(h('figure', [
         h('message', { nickname: '作品详情' }, [imageElement, '\n' + infoBlock]),
         h('message', { nickname: '文件列表' }, fileListText)
       ]));
     } else {
-      await session.send([h.image(workInfo.mainCoverUrl), infoBlock, fileListText].join('\n\n'));
+      await session.send([imageElement, h('br'), infoBlock, h('br'), fileListText]);
     }
   }
 
   // 发送搜索结果，自动选择图片或文本模式
-  private async sendSearchTextResult(session: Session, data: ApiSearchResponse, page: number) {
+  private async sendSearchResult(session: Session, data: ApiSearchResponse, page: number) {
     // 优先使用图片菜单
     if (this.config.useImageMenu && this.ctx.puppeteer) {
       const keyString = JSON.stringify({ query: session.content, page }); // 使用原始消息和页码作为缓存键
@@ -406,6 +408,11 @@ export class CommandHandler {
     }
 
     // 图片模式失败或未开启，则发送文本
+    await this.sendSearchResultAsText(session, data, page);
+  }
+
+  // 优化：增强图片发送的可靠性
+  private async sendSearchResultAsText(session: Session, data: ApiSearchResponse, page: number) {
     const header = `为你找到 ${data.pagination.totalCount} 个结果 (第 ${page} 页):`;
     const buildEntryText = (work: BaseWork, index: number): string => {
       const rjCode = `RJ${String(work.id).padStart(8, '0')}`;
@@ -426,23 +433,28 @@ export class CommandHandler {
       const messageNodes = [h('message', { nickname: session.bot.user?.name || session.bot.selfId }, header)];
       for (const [index, work] of data.works.entries()) {
         const entryText = buildEntryText(work, index);
-        let content: (string | h)[] = [entryText];
+        let content: (string | Element)[] = [entryText];
         if (this.config.showSearchImage) {
           const imageUri = await this.api.downloadImageAsDataUri(work.mainCoverUrl);
-          content = imageUri ? [h.image(imageUri), '\n', entryText] : ['[封面加载失败]\n', entryText];
+          const imageElement = imageUri ? h.image(imageUri) : h('p', '封面加载失败');
+          content = [imageElement, h('br'), entryText];
         }
         messageNodes.push(h('message', { nickname: `结果 ${(page - 1) * this.config.pageSize + index + 1}` }, content));
       }
       await session.send(h('figure', messageNodes));
     } else {
-      const messageElements: (string | Element)[] = [header];
+      let messageElements: Element[] = [h('p', header)];
       for (const [index, work] of data.works.entries()) {
-        messageElements.push('\n' + '─'.repeat(15) + '\n');
-        if (this.config.showSearchImage) messageElements.push(h('image', { src: work.mainCoverUrl }));
-        messageElements.push(buildEntryText(work, index));
+        messageElements.push(h('p', '─'.repeat(15)));
+        if (this.config.showSearchImage) {
+          const imageUri = await this.api.downloadImageAsDataUri(work.mainCoverUrl);
+          const imageElement = imageUri ? h.image(imageUri) : h('p', '封面加载失败');
+          messageElements.push(imageElement);
+        }
+        messageElements.push(h('p', buildEntryText(work, index)));
       }
-      await session.send(messageElements);
+      await session.send(h('message', messageElements));
     }
   }
 }
-// --- END OF FILE src/commands/handler.ts ---
+// --- END OF FILE src/commands/handler.ts ---[]

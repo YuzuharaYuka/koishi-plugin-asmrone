@@ -1,3 +1,5 @@
+// --- START OF FILE src/common/utils.ts ---
+
 import { TrackItem, DisplayItem, ProcessedFile } from './types'
 
 export function formatRjCode(rjInput: string): string | null {
@@ -28,6 +30,7 @@ export function formatTrackDuration(seconds: number): string {
   const s = Math.round(seconds % 60);
   const pad = (n: number) => n.toString().padStart(2, '0');
   if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  // 修正：确保分钟在无小时的情况下也能正确补零
   return `${pad(m)}:${pad(s)}`;
 }
 
@@ -65,45 +68,48 @@ export function parseTrackIndices(args: string[]): number[] {
 export const getSafeFilename = (name: string) => name.replace(/[\/\\?%*:|"<>]/g, '_');
 export const getZipFilename = (baseName: string): string => `${baseName.replace(/[\/\\?%*:|"<>]/g, '_')}.zip`;
 
-// --- V5 优化：精简数据处理 ---
+// --- V6 优化：重构文件处理逻辑 ---
 export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem[], processedFiles: ProcessedFile[] } {
   const displayItems: DisplayItem[] = [];
   const processedFiles: ProcessedFile[] = [];
   let fileCounter = 0;
 
+  // 内部函数，用于根据API类型和文件名扩展名确定统一的文件类型
   function getFileType(item: TrackItem): DisplayItem['type'] {
-    switch (item.type) {
-      case 'folder': return 'folder';
-      case 'audio': return 'audio';
-      case 'image': return 'image';
-      case 'text': return 'subtitle';
+    if (item.type === 'folder') return 'folder';
+    if (item.mediaDownloadUrl) { // 优先判断是否可下载
+      const title = item.title.toLowerCase();
+      if (item.type === 'audio' || /\.(mp3|wav|flac|m4a|ogg)$/.test(title)) return 'audio';
+      if (item.type === 'image' || /\.(jpg|jpeg|png|gif|webp)$/.test(title)) return 'image';
+      if (item.type === 'video' || /\.(mp4|mov|avi|mkv|webm)$/.test(title)) return 'video';
+      if (/\.(txt|srt|ass|vtt|lrc)$/.test(title)) return 'subtitle';
+      if (/\.(pdf|doc|docx)$/.test(title)) return 'doc';
     }
-    const title = item.title.toLowerCase();
-    if (/\.(mp4|mov|avi|mkv|webm)$/.test(title)) return 'video';
-    if (/\.(jpg|jpeg|png|gif|webp)$/.test(title)) return 'image';
-    if (/\.(mp3|wav|flac|m4a|ogg)$/.test(title)) return 'audio';
-    if (/\.(pdf|doc|docx)$/.test(title)) return 'doc';
-    if (/\.(txt|vtt|srt|ass)$/.test(title)) return 'subtitle';
+    // 对于不可下载的文件夹或未知类型
+    if (item.type === 'folder') return 'folder';
     return 'unknown';
   }
 
+  // 排序比较函数：优先按类型排序，然后按文件名进行自然排序
   const sorter = (a: TrackItem, b: TrackItem) => {
     const typePriority = {
-      audio: 0, video: 1, image: 2, subtitle: 3, doc: 4, unknown: 5, folder: 6
+      folder: 0, audio: 1, video: 2, image: 3, subtitle: 4, doc: 5, unknown: 6
     };
     const typeA = getFileType(a);
     const typeB = getFileType(b);
     const priorityA = typePriority[typeA];
     const priorityB = typePriority[typeB];
+
     if (priorityA !== priorityB) {
       return priorityA - priorityB;
     }
+    // 使用 localeCompare 进行自然排序，例如 'track 2' 会排在 'track 10' 之前
     return a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' });
   };
 
   function traverse(item: TrackItem, depth: number, currentPath: string) {
     const fileType = getFileType(item);
-    const isDownloadable = !!item.mediaDownloadUrl; // 只关心 downloadUrl
+    const isDownloadable = !!item.mediaDownloadUrl && item.type !== 'folder';
     const safeTitle = getSafeFilename(item.title);
     const newPath = currentPath ? `${currentPath}/${safeTitle}` : safeTitle;
 
@@ -122,20 +128,20 @@ export function processFileTree(items: TrackItem[]): { displayItems: DisplayItem
       processedFiles.push({
         title: item.title,
         path: newPath,
-        url: item.mediaDownloadUrl, // 只保留这一个 URL
+        url: item.mediaDownloadUrl,
         type: fileType,
-        // duration 和 size 不再需要
       });
     }
 
-    if (item.type === 'folder' && item.children) {
-      item.children.sort(sorter);
-      item.children.forEach(child => traverse(child, depth + 1, newPath));
+    if (item.type === 'folder' && item.children?.length > 0) {
+      // 在遍历子项前先排序
+      item.children.sort(sorter).forEach(child => traverse(child, depth + 1, newPath));
     }
   }
 
-  items.sort(sorter);
-  items.forEach(item => traverse(item, 0, ''));
+  // 根级别排序
+  items.sort(sorter).forEach(item => traverse(item, 0, ''));
 
   return { displayItems, processedFiles };
 }
+// --- END OF FILE src/common/utils.ts ---

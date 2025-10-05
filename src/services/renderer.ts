@@ -22,9 +22,9 @@ export class Renderer {
   public async renderWithCache(cacheKey: string, htmlGenerator: () => Promise<string>): Promise<Buffer | null> {
     let cleanImageBuffer: Buffer | null = null;
 
-    if (this.config.renderCache.enableRenderCache) {
+    if (this.config.cache.enableRenderCache) {
       const cachePath = resolve(this.renderCacheDir, `${cacheKey}.png`);
-      const maxAgeMs = this.config.renderCache.renderCacheMaxAge * 3600 * 1000;
+      const maxAgeMs = this.config.cache.renderCacheMaxAge * 3600 * 1000;
       try {
         const stats = await fs.stat(cachePath);
         if (maxAgeMs === 0 || (Date.now() - stats.mtimeMs < maxAgeMs)) {
@@ -43,7 +43,7 @@ export class Renderer {
       const html = await htmlGenerator();
       cleanImageBuffer = await this._renderHtmlViaPuppeteer(html);
 
-      if (cleanImageBuffer && this.config.renderCache.enableRenderCache) {
+      if (cleanImageBuffer && this.config.cache.enableRenderCache) {
         const cachePath = resolve(this.renderCacheDir, `${cacheKey}.png`);
         fs.mkdir(this.renderCacheDir, { recursive: true })
           .then(() => fs.writeFile(cachePath, cleanImageBuffer))
@@ -53,7 +53,7 @@ export class Renderer {
 
     if (!cleanImageBuffer) return null;
 
-    if (this.config.imageMenu?.enableAntiCensorship) {
+    if (this.config.enableAntiCensorship) {
       return this._applyAntiCensorship(cleanImageBuffer);
     }
 
@@ -102,7 +102,7 @@ export class Renderer {
     try {
       page = await this.ctx.puppeteer.page();
 
-      const scale = this.config.imageMenu?.imageRenderScale || 2;
+      const scale = this.config.imageRenderScale || 1; // 修正：默认值设为1而非2
       await page.setViewport({ width: 900, height: 600, deviceScaleFactor: scale });
 
       await page.setContent(html, { waitUntil: 'networkidle0' });
