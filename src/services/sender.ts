@@ -11,12 +11,12 @@ import { Config } from '../config'
 import { SendMode, ZipMode, CardModeNonAudioAction, VoiceModeNonAudioAction, USER_AGENT, RETRY_DELAY_MS, MIN_FILE_SIZE_BYTES, LINK_SEND_DELAY_MS, ONEBOT_MUSIC_CARD_TYPE } from '../common/constants'
 import { getSafeFilename, getZipFilename } from '../common/utils'
 
-// --- V10 Payload 扩充字典 ---
+// 优化：调整字典顺序以符合直觉
 const URL_DICTIONARY = {
   // d0-d9: API & Cover Domains
-  'd0': 'https://api.asmr-200.com/api/',
-  'd1': 'https://api.asmr.one/api/',
-  'd2': 'https://api.asmr-100.com/api/',
+  'd0': 'https://api.asmr.one/api/',
+  'd1': 'https://api.asmr-100.com/api/',
+  'd2': 'https://api.asmr-200.com/api/',
   'd3': 'https://api.asmr-300.com/api/',
   // a0-a9: Audio CDN Domains
   'a0': 'https://raw.kiko-play-niptan.one/',
@@ -27,7 +27,6 @@ const URL_DICTIONARY = {
   'p1': 'media/download/',
   'p2': 'media/stream/',
 };
-// 预处理字典，按前缀长度降序排序，以便优先匹配最长的前缀
 const DICTIONARY_ENTRIES = Object.entries(URL_DICTIONARY).sort((a, b) => b[1].length - a[1].length);
 
 interface SendResultTracker {
@@ -38,7 +37,6 @@ interface SendResultTracker {
 
 export class TrackSender {
   private logger: Logger
-  // 修正：将 User--Agent 改为标准的 User-Agent
   private requestOptions = {
     headers: { 'User-Agent': USER_AGENT },
   }
@@ -47,36 +45,34 @@ export class TrackSender {
     this.logger = ctx.logger('asmrone')
   }
 
-  // 辅助函数：压缩单个 URL (优化版)
   private _compressUrl(url: string): string | (string | (string | string[])[])[] {
-    // 寻找域名+路径的最佳匹配
     for (const [domainKey, domainPrefix] of DICTIONARY_ENTRIES.filter(([k]) => k.startsWith('d') || k.startsWith('a'))) {
       if (url.startsWith(domainPrefix)) {
         const remainingPath = url.substring(domainPrefix.length);
         for (const [pathKey, pathPrefix] of DICTIONARY_ENTRIES.filter(([k]) => k.startsWith('p'))) {
           if (remainingPath.startsWith(pathPrefix)) {
-            // 匹配到 域名+路径
             return [[domainKey, pathKey], remainingPath.substring(pathPrefix.length)];
           }
         }
-        // 只匹配到域名
         return [domainKey, remainingPath];
       }
     }
-    // 未找到任何匹配，返回原始URL
     return url;
   }
 
-  /**
-   * 生成并发送在线播放器链接
-   * V10 Payload 结构:
-   * {
-   *   w: string,                  // Work Title
-   *   r: string,                  // RJ Code (36进制压缩)
-   *   c: string | [string, any],  // Cover URL (压缩后)
-   *   t: [string | [string, any], string][] // Tracks: [[compressedUrl, trackTitle], ...]
-   * }
-   */
+  private _findCommonBase(urls: string[]): string {
+    if (!urls || urls.length === 0) return '';
+    if (urls.length === 1) return urls[0];
+    const sorted = [...urls].sort();
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    let i = 0;
+    while (i < first.length && first.charAt(i) === last.charAt(i)) {
+      i++;
+    }
+    return first.substring(0, i);
+  }
+
   private async _sendAsPlayer(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {
     const playerBaseUrl = this.config.player?.playerBaseUrl;
     if (!playerBaseUrl || !playerBaseUrl.startsWith('http')) {
@@ -92,29 +88,39 @@ export class TrackSender {
       return;
     }
 
-    // 1. RJ号转为36进制以缩短长度
+    const decodedUrls = audioFiles.map(({ file }) => {
+      try {
+        return decodeURIComponent(file.url);
+      } catch (e) {
+        return file.url;
+      }
+    });
+
+    const commonBase = this._findCommonBase(decodedUrls);
+    const compressedBase = this._compressUrl(commonBase);
+
+    const tracks = audioFiles.map(({ file }, index) => [
+      decodedUrls[index].substring(commonBase.length),
+      file.title
+    ]);
+
     const rjNum = parseInt(String(workInfo.id).replace(/^RJ/i, ''), 10);
     const compressedRj = rjNum.toString(36);
-
-    // 2. 压缩封面和音轨URL
     const compressedCover = this._compressUrl(workInfo.mainCoverUrl);
-    const tracks = audioFiles.map(({ file }) => [this._compressUrl(file.url), file.title]);
 
-    // 3. 构建 V10 Payload
-    const payload = {
-      w: workInfo.title,
-      r: compressedRj,
-      c: compressedCover,
-      t: tracks,
-    };
+    const payload = [
+      workInfo.title,
+      compressedRj,
+      compressedCover,
+      compressedBase,
+      tracks
+    ];
 
-    // 4. 压缩与编码
     const jsonString = JSON.stringify(payload);
     const compressed = pako.deflate(jsonString, { level: 9 });
     const base64Payload = Buffer.from(compressed).toString('base64url');
     const finalPlayerUrl = `${playerBaseUrl.endsWith('/') ? playerBaseUrl : playerBaseUrl + '/'}?p=${base64Payload}`;
 
-    // 5. 发送消息
     try {
       const message = audioFiles.length > 1
         ? `已为您生成包含 ${audioFiles.length} 个音轨的播放列表，请点击下方链接收听：`
@@ -136,6 +142,7 @@ export class TrackSender {
   }
 
   async processAndSendTracks(indices: number[], allFiles: ProcessedFile[], workInfo: WorkInfoResponse, session: Session, mode: SendMode) {
+    // ... (此函数及以下其他发送逻辑保持不变)
     const validFiles: ValidFile[] = indices
       .map(i => ({ index: i, file: allFiles[i - 1] }))
       .filter(item => item.file);
@@ -197,25 +204,6 @@ export class TrackSender {
       }
     }
     await session.send(summary);
-  }
-
-  private _findCommonBase(urls: string[]): string {
-    if (!urls || urls.length === 0) return '';
-    if (urls.length === 1) {
-      const url = urls[0];
-      const lastSlash = url.lastIndexOf('/');
-      return lastSlash > -1 ? url.substring(0, lastSlash + 1) : '';
-    }
-    const sortedUrls = [...urls].sort();
-    const first = sortedUrls[0];
-    const last = sortedUrls[sortedUrls.length - 1];
-    let i = 0;
-    while (i < first.length && first[i] === last[i]) {
-      i++;
-    }
-    const commonPrefix = first.substring(0, i);
-    const lastSlash = commonPrefix.lastIndexOf('/');
-    return lastSlash > -1 ? commonPrefix.substring(0, lastSlash + 1) : '';
   }
 
   private async _sendAsVoice(validFiles: ValidFile[], workInfo: WorkInfoResponse, session: Session, results: SendResultTracker) {

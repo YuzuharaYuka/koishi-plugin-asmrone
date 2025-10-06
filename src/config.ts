@@ -92,7 +92,7 @@ export const Config = Schema.intersect([
       Schema.const(SendMode.PLAYER).description('在线播放器 (player)'),
       Schema.const(SendMode.LINK).description('下载链接 (link)'),
       Schema.const(SendMode.VOICE).description('语音 (voice)'),
-    ]).default(SendMode.PLAYER).description('`听音声` 指令的默认音轨发送方式。'),
+    ]).default(SendMode.CARD).description('`听音声` 指令的默认音轨发送方式。'),
     useImageMenu: Schema.boolean().default(true).description('使用图片发送搜索结果和作品详情 (推荐，需要 puppeteer 服务)。'),
     useForward: Schema.boolean().default(true).description('[文本模式] 启用合并转发发送长消息，减少刷屏。'),
     showSearchImage: Schema.boolean().default(false).description('[文本模式] 在搜索结果的文本消息中也显示封面图。'),
